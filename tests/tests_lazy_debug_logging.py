@@ -34,6 +34,12 @@ class LoudBytes(bytes):
         LoudBytes.call_counts[self._counter_key] += 1
         return bytes.__repr__(self)
 
+    def __getitem__(self, item):
+        result = super().__getitem__(item)
+        if isinstance(item, slice):
+            return LoudBytes(result, self._counter_key)
+        return result
+
 
 class LazyDebugLoggingTests(TestCase):
 
@@ -104,7 +110,6 @@ class LazyDebugLoggingTests(TestCase):
             base_input = BaseInput()
             base_input.dispatch_diag_response(b'\x4b\x01\x02\x03')
             handler.flush()
-            self.assertIn('01 02 03', stream.getvalue().replace('\\x', ' ').replace("'", '') or
-                           repr(b'\x01\x02\x03')[2:-1].replace('\\x', ' '))
+            self.assertIn('01 02 03', stream.getvalue().replace('\\x', ' ').replace("'", ''))
         finally:
             self.logger.removeHandler(handler)

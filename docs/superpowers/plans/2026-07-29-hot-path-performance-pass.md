@@ -26,7 +26,7 @@
 
 **Interfaces:**
 - Consumes: `HdlcMixin.TRAILER_CHAR` (class attribute, `b'\x7e'`), `HdlcMixin.hdlc_encapsulate`/`hdlc_decapsulate`/`InvalidFrameError` (unchanged, from `src/inputs/_hdlc_mixin.py`).
-- Produces: `UsbModemPyserialConnector._read_frame(self) -> bytes` — reads from `self.serial` until a trailer byte is found, returns the raw (still HDLC-escaped) frame including the trailing `0x7e`. Raises `AssertionError` if the serial port returns no data (closed/preempted). Used internally by `read_loop`; also the target of direct unit testing since `read_loop` itself runs an unbounded `while True` and calls `exit()` on error paths, making it unsuitable to unit test directly.
+- Produces: `UsbModemPyserialConnector._read_frame(self) -> bytes` — reads from `self.serial` into a residual `self.packet_buffer` until a trailer byte is found, then returns exactly one frame (up to and including the first trailer byte), retaining any bytes read past that trailer for the next call. This is necessary because `in_waiting` reports the entire OS receive buffer, not just the current frame's bytes — under load, multiple frames are commonly buffered at once, and returning them all concatenated would corrupt CRC validation downstream. Raises `ConnectionError` if the serial port returns no data (closed/preempted). Used internally by `read_loop`; also the target of direct unit testing since `read_loop` itself runs an unbounded `while True` and calls `exit()` on error paths, making it unsuitable to unit test directly.
 
 ### Step 1: Write the failing tests
 
@@ -55,9 +55,10 @@ class FakeSerial:
 
     :param chunks: A list of byte strings. Each call to read() consumes
         bytes from the front of the concatenated stream. ``in_waiting``
-        reports the size of the *current* chunk only (not the whole
-        remaining stream), to simulate data arriving in discrete bursts
-        from the OS driver.
+        reports the total number of bytes remaining across all
+        not-yet-consumed chunks, matching real pyserial semantics where
+        in_waiting reports the entire OS receive buffer, not just the
+        current burst.
     """
 
     def __init__(self, chunks):
@@ -66,9 +67,7 @@ class FakeSerial:
 
     @property
     def in_waiting(self):
-        if not self._chunks:
-            return 0
-        return len(self._chunks[0])
+        return sum(len(c) for c in self._chunks)
 
     def read(self, size=1):
         self.read_call_count += 1
@@ -91,6 +90,7 @@ class FrameReaderUnderTest(UsbModemPyserialConnector):
 
     def __init__(self, serial):
         self.serial = serial
+        self.packet_buffer = b''
 
 
 class UsbModemPyserialReadFrameTests(TestCase):
@@ -151,8 +151,41 @@ class UsbModemPyserialReadFrameTests(TestCase):
         serial = FakeSerial([])
         reader = FrameReaderUnderTest(serial)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ConnectionError):
             reader._read_frame()
+
+    def test_read_frame_returns_one_frame_at_a_time_when_multiple_are_buffered(self):
+        # Multiple full HDLC frames arrive in the OS receive buffer at
+        # once (the normal case under load). _read_frame must return
+        # them one at a time, not merge them into a single blob.
+        hdlc = HdlcMixin()
+        frame1 = hdlc.hdlc_encapsulate(b'\x01\x02\x03')
+        frame2 = hdlc.hdlc_encapsulate(b'\x04\x05\x06')
+        frame3 = hdlc.hdlc_encapsulate(b'\x07\x08\x09')
+
+        serial = FakeSerial([frame1 + frame2 + frame3])
+        reader = FrameReaderUnderTest(serial)
+        reader.packet_buffer = b''
+
+        self.assertEqual(reader._read_frame(), frame1)
+        self.assertEqual(reader._read_frame(), frame2)
+        self.assertEqual(reader._read_frame(), frame3)
+
+    def test_read_frame_retains_partial_trailing_frame_for_next_call(self):
+        # A batch containing one full frame plus the start of a second
+        # (incomplete) frame must return only the complete frame, and
+        # retain the partial bytes for the next call.
+        hdlc = HdlcMixin()
+        frame1 = hdlc.hdlc_encapsulate(b'\xaa\xbb')
+        frame2 = hdlc.hdlc_encapsulate(b'\xcc\xdd')
+        partial_frame2 = frame2[:2]  # incomplete - no trailer yet
+
+        serial = FakeSerial([frame1 + partial_frame2, frame2[2:]])
+        reader = FrameReaderUnderTest(serial)
+        reader.packet_buffer = b''
+
+        self.assertEqual(reader._read_frame(), frame1)
+        self.assertEqual(reader._read_frame(), frame2)
 ```
 
 ### Step 2: Run the tests to verify they fail
@@ -163,7 +196,28 @@ Expected: `ImportError` or `AttributeError` — `_read_frame` does not exist yet
 
 ### Step 3: Implement `_read_frame` and rewrite `read_loop`
 
-In `src/inputs/usb_modem_pyserial.py`, replace lines 227-272 (the existing `read_loop` method) with:
+`in_waiting` reports the size of pyserial's *entire* OS receive buffer,
+not just the bytes belonging to the frame currently being assembled.
+Under load it is normal for two or more Diag frames to already be
+sitting in that buffer at once, so a naive
+`while not raw_payload.endswith(TRAILER_CHAR): raw_payload += serial.read(serial.in_waiting)`
+loop will read past the first frame's trailer into the next frame(s),
+return a multi-frame blob as if it were one frame, and cause
+`hdlc_decapsulate` to fail CRC validation (silently dropping the whole
+batch via `read_loop`'s `except InvalidFrameError: continue`).
+
+To avoid this, `_read_frame` keeps a residual buffer (`self.packet_buffer`)
+across calls: it accumulates chunks into that buffer until at least one
+trailer byte is present, then splits off and returns exactly one frame
+(everything up to and including the first trailer byte), leaving any
+extra bytes — which belong to the next frame — buffered for the next
+call. This is the same accumulate-and-split-on-trailer pattern already
+used by `tcp_connector.py` and `adb.py`.
+
+In `src/inputs/usb_modem_pyserial.py`, add `self.packet_buffer = b''` in
+`__init__` (alongside `self.received_first_packet = False`, before the
+`super().__init__()` call), and replace lines 227-272 (the existing
+`read_loop` method) with:
 
 ```python
     def _read_frame(self):
@@ -172,27 +226,30 @@ In `src/inputs/usb_modem_pyserial.py`, replace lines 227-272 (the existing `read
             Read bytes from the serial port until a trailer byte is found,
             minimizing the number of read() calls by consuming all bytes
             already buffered by the OS/driver at once (via in_waiting),
-            instead of reading one byte per call.
+            instead of reading one byte per call. Any bytes read past the
+            first trailer (belonging to the next frame) are retained in
+            self.packet_buffer for the next call.
             
             :returns: The raw (still HDLC-escaped) frame, including the
                 trailing 0x7e byte.
-            :raises AssertionError: if the serial port returned no data
+            :raises ConnectionError: if the serial port returned no data
                 (closed or preempted by another process).
         """
         
-        raw_payload = bytearray()
-        
-        while not raw_payload.endswith(self.TRAILER_CHAR):
+        while self.TRAILER_CHAR not in self.packet_buffer:
             
             bytes_waiting = self.serial.in_waiting
             
             chunk = self.serial.read(bytes_waiting if bytes_waiting > 0 else 1)
             
-            assert chunk
+            if not chunk:
+                raise ConnectionError('Serial port returned no data (closed or preempted)')
             
-            raw_payload += chunk
+            self.packet_buffer += chunk
         
-        return bytes(raw_payload)
+        raw_payload, self.packet_buffer = self.packet_buffer.split(self.TRAILER_CHAR, 1)
+        
+        return raw_payload + self.TRAILER_CHAR
     
     def read_loop(self):
         
@@ -237,7 +294,7 @@ In `src/inputs/usb_modem_pyserial.py`, replace lines 227-272 (the existing `read
 
 Run: `python -m unittest tests.tests_usb_modem_pyserial -v`
 
-Expected: all 4 tests PASS.
+Expected: all 6 tests PASS.
 
 ### Step 5: Run the existing HDLC test suite to confirm no regression
 

@@ -396,7 +396,7 @@ class BaseInput:
         
         opcode, payload = unframed_diag_packet[0], unframed_diag_packet[1:]
         
-        debug('[<] Received response %s of length %d: %s' % (get_message_name(opcode), len(payload), repr(payload)))
+        debug('[<] Received response %s of length %d: %s', get_message_name(opcode), len(payload), payload)
 
         with self.event_diag_response_received:
             
@@ -407,7 +407,7 @@ class BaseInput:
     
     def dispatch_diag_log(self, log_type, log_payload, log_header, timestamp):
         
-        debug('[<] Received log 0x%04x of length %d: %s' % (log_type, len(log_payload), repr(log_payload)))
+        debug('[<] Received log 0x%04x of length %d: %s', log_type, len(log_payload), log_payload)
         
         for module in self.modules:
             if hasattr(module, 'on_log'):
@@ -416,7 +416,7 @@ class BaseInput:
 
     def dispatch_diag_event(self, event_id, event_payload, timestamp):
         
-        debug('[<] Received event 0x%04x of length %d: %s' % (event_id, len(event_payload), repr(event_payload)))
+        debug('[<] Received event 0x%04x of length %d: %s', event_id, len(event_payload), event_payload)
         
         for module in self.modules:
             if hasattr(module, 'on_event'):
@@ -426,7 +426,7 @@ class BaseInput:
     
     def dispatch_diag_message(self, opcode, payload):
         
-        debug('[<] Received message with opcode %s of length %d: %s' % (get_message_name(opcode), len(payload), repr(payload)))
+        debug('[<] Received message with opcode %s of length %d: %s', get_message_name(opcode), len(payload), payload)
         
         for module in self.modules:
             if hasattr(module, 'on_message'):

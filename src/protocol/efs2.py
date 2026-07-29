@@ -25,8 +25,20 @@ EFS2_FILE_TYPES = {
     0o120000: 'Symlink (S_IFLNK)',
     0o140000: 'Socket (S_IFSOCK)',
     0o160000: 'Item File (S_IFITM)',
-    0o170000: 'Mask of all values (S_IFMT)',  
+    0o170000: 'Mask of all values (S_IFMT)',
 }
+
+"""
+    Return a printable name for the file type encoded in an EFS2 "mode"
+    field. The modem is free to report a type nibble that isn't in the table
+    above, so this never raises: an unknown value is rendered as-is instead.
+"""
+
+def efs2_file_type_name(mode : int) -> str:
+
+    file_type = mode & 0o170000
+
+    return EFS2_FILE_TYPES.get(file_type, 'Unknown (0o%o)' % (file_type >> 12))
 
 EFS2_DIAG_HELLO = 0
 EFS2_DIAG_QUERY = 1

@@ -3,7 +3,7 @@
 from argparse import ArgumentParser, _SubParsersAction, Namespace
 from typing import Dict, List, Set, Sequence, Optional
 from logging import error, warning, debug, info
-from traceback import print_exc
+from traceback import print_exc, format_exc
 from struct import pack, unpack
 from subprocess import run
 from shutil import which
@@ -115,19 +115,41 @@ class EfsShell:
                         else:
                             
                             self.send_efs_handshake()
-                            
-                            try:
-                            
-                                command_object.execute_command(self.diag_input, parsed_args)
-                            
-                            except SystemExit:
-                                
-                                pass
+
+                            self._run_efs_command(command_object, parsed_args)
                     
                     else:
                         
                         self.print_help()
     
+    """
+        Run one EFS shell command, keeping the shell alive whatever the
+        command does.
+
+        The command body parses a reply composed by the modem, so an unusual
+        or truncated reply surfaces here as struct.error, KeyError or
+        IndexError. That should cost the user one command and a diagnostic,
+        then return them to the prompt - losing the whole interactive session
+        (and its readline history) to a single odd packet is a much worse
+        outcome. SystemExit keeps its pre-existing meaning of "this command is
+        done"; KeyboardInterrupt is left to propagate so Ctrl-C still works.
+    """
+
+    def _run_efs_command(self, command_object : BaseEfsShellCommand, parsed_args : Optional[Namespace]):
+
+        try:
+
+            command_object.execute_command(self.diag_input, parsed_args)
+
+        except SystemExit:
+
+            pass
+
+        except Exception:
+
+            warning('The %s command failed to process the device\'s reply:\n%s',
+                type(command_object).__name__, format_exc())
+
     def send_efs_handshake(self):
         
         opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, pack('<BH6I3II',

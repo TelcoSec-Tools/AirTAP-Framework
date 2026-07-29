@@ -106,7 +106,7 @@ class LsCommand(BaseEfsShellCommand):
                         return                    
                 
                 table_rows_to_print.append({
-                    'File type': EFS2_FILE_TYPES[mode & 0o170000],
+                    'File type': efs2_file_type_name(mode),
                     'Special flags': ' '.join(special_flags),
                     'File rights': file_rights,
                     'File name': repr(entry_path.rstrip(b'\x00').decode('latin1')) + (

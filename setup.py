@@ -21,7 +21,16 @@ setup(name = 'airtap',
             'airtap = airtap.main:main'
         ]
     },
-    url = 'https://github.com/P1sec/AirTap',
+    # SPDX expression rather than a "License ::" classifier, which setuptools
+    # deprecated in 77.0. GPL-3.0-only (not -or-later) because neither the
+    # upstream LICENSE nor any source header grants the "any later version"
+    # option.
+    license = 'GPL-3.0-only',
+    license_files = ['LICENSE'],
+    classifiers = [
+        'Programming Language :: Python :: 3',
+        'Topic :: Communications :: Ham Radio'
+    ],
     install_requires = [
         'pyserial>=3.5',
         'pyusb>=1.2.1',

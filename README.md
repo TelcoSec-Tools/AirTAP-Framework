@@ -37,3 +37,18 @@ python3 airtap.py --usb-modem auto --wireshark-live --stats
 * **4G (LTE)**: Layer 3 and upwards (RRC/...) with NAS decryption (`--decrypt-nas`)
 * **5G (NR)**: Layer 3 and upwards (RRC & 5GMM/5GSM NAS) with GSMTAP v2 encapsulation (`GSMTAP_TYPE_NR_RRC`, `GSMTAP_TYPE_NR_NAS`)
 * **Telemetry**: Real-time packet throughput, rate metrics, and RAT distribution breakdown (`--stats`)
+
+## License and attribution
+
+AirTap is licensed under the **GNU General Public License v3.0**. The full text is in [LICENSE](LICENSE).
+
+AirTap is a derivative work of [QCSuper](https://github.com/P1sec/QCSuper), created by
+[P1sec](https://github.com/P1sec) and released under the GPL-3.0. The Diag protocol
+implementation, GSMTAP encapsulation and EFS shell originate in that project; AirTap
+renames the tool and builds on it. Because the GPL-3.0 is a copyleft license, AirTap is
+distributed under those same terms, and this attribution and the accompanying license
+text must be retained in any further redistribution.
+
+QCSuper in turn credits the Osmocom project (GSMTAP), Wireshark, ModemManager,
+SnoopSnitch / gsm-parser, diag-parser, MobileInsight, OpenPST and SCAT — see the
+upstream README for the full acknowledgements.

@@ -32,7 +32,7 @@ class HdlcMixin:
 
     def hdlc_encapsulate(self, payload: bytes) -> bytes:
         if payload:
-            debug('[>] Sending request %s of length %d: %s' % (get_message_name(payload[0]), len(payload[1:]), payload[1:]))
+            debug('[>] Sending request %s of length %d: %s', get_message_name(payload[0]), len(payload[1:]), payload[1:])
         
         # Calculate and append CRC16
         crc_payload = payload + pack('<H', self.ccitt_crc16(payload))

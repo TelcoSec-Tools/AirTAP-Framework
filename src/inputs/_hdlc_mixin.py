@@ -71,11 +71,11 @@ class HdlcMixin:
         received_crc = unpack('<H', raw_message[-2:])[0]
         
         if received_crc != calculated_crc:
-            warning('Ignoring (partial?) frame: Wrong CRC: %s (is: %04x, should be: %04x)' % (
-                repr(raw_message[:-2]),
+            warning('Ignoring (partial?) frame: Wrong CRC: %s (is: %04x, should be: %04x)',
+                raw_message[:-2],
                 received_crc,
                 calculated_crc
-            ))
+            )
             raise self.InvalidFrameError
 
         return raw_message[:-2]

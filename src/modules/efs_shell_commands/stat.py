@@ -84,7 +84,7 @@ class StatCommand(BaseEfsShellCommand):
         print()
         
         for row, value in {
-            'File type': EFS2_FILE_TYPES[mode & 0o170000],
+            'File type': efs2_file_type_name(mode),
             'Special flags': ' '.join(special_flags),
             'File rights': file_rights,
             'File name': repr(args.path) + (

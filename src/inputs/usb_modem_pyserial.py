@@ -3,6 +3,7 @@
 from subprocess import run, DEVNULL, PIPE, STDOUT, CalledProcessError
 from os import access, R_OK, W_OK, listdir, kill, makedirs, remove
 from logging import error, warning, info, debug
+from traceback import format_exc
 from os.path import exists, realpath, basename
 from subprocess import Popen
 from signal import SIGTERM
@@ -264,8 +265,23 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
             try:
                 raw_payload = self._read_frame()
 
-            except Exception:
+            # A vanished port is an operational event, not a defect: the cable
+            # was unplugged, or another process (ModemManager) grabbed the
+            # port. Both the ConnectionError raised by _read_frame and
+            # pyserial's SerialException are OSError subclasses.
+
+            except OSError:
                 error('\nThe serial port was closed or preempted by another process.')
+
+                exit()
+
+            # Anything else is a defect in the frame reader rather than a
+            # disconnect. Blaming the serial port for it sends the user
+            # chasing cables, so report it as what it is and keep the
+            # traceback.
+
+            except Exception:
+                error('\nUnexpected error while reading from the serial port:\n%s', format_exc())
 
                 exit()
 

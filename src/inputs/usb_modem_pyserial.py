@@ -224,51 +224,70 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
         
         self.serial.write(raw_payload)
     
-    def read_loop(self):
-        
-        while True:
-                
-            # Read more bytes until a trailer character is found
+    def _read_frame(self):
 
-            raw_payload = b''
-            
-            while not raw_payload.endswith(self.TRAILER_CHAR):
-                
-                try:
-                    char_read = self.serial.read()
-                    assert char_read
-                
-                except Exception:
-                    error('\nThe serial port was closed or preempted by another process.')
-                    
-                    exit()
-                
-                raw_payload += char_read
-            
+        """
+            Read bytes from the serial port until a trailer byte is found,
+            minimizing the number of read() calls by consuming all bytes
+            already buffered by the OS/driver at once (via in_waiting),
+            instead of reading one byte per call.
+
+            :returns: The raw (still HDLC-escaped) frame, including the
+                trailing 0x7e byte.
+            :raises AssertionError: if the serial port returned no data
+                (closed or preempted by another process).
+        """
+
+        raw_payload = bytearray()
+
+        while not raw_payload.endswith(self.TRAILER_CHAR):
+
+            bytes_waiting = self.serial.in_waiting
+
+            chunk = self.serial.read(bytes_waiting if bytes_waiting > 0 else 1)
+
+            assert chunk
+
+            raw_payload += chunk
+
+        return bytes(raw_payload)
+
+    def read_loop(self):
+
+        while True:
+
+            try:
+                raw_payload = self._read_frame()
+
+            except Exception:
+                error('\nThe serial port was closed or preempted by another process.')
+
+                exit()
+
             # Decapsulate and dispatch
-            
+
             if raw_payload == self.TRAILER_CHAR:
                 error('The modem seems to be unavailable.')
-                
+
                 exit()
-            
+
             try:
-            
+
                 unframed_message = self.hdlc_decapsulate(
                     payload = raw_payload
                 )
-            
+
             except self.InvalidFrameError:
-                
+
                 # The first packet that we receive over the Diag input may
                 # be partial
-                
+
                 continue
-            
+
             finally:
-                
+
                 self.received_first_packet = True
-            
+
             self.dispatch_received_diag_packet(unframed_message)
 
 

@@ -114,7 +114,7 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
                     if not access(fds_dir, R_OK):
                         
                         error(('The process "%s" may possibly be interfering with ' +
-                               "QCSuper, however it can't be confirmed because " +
+                               "AirTap, however it can't be confirmed because " +
                                "you're not root. Please re-run with sudo to " +
                                'take appropriate action.') % proc_name)
                         

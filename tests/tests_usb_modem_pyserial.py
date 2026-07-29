@@ -20,9 +20,10 @@ class FakeSerial:
 
     :param chunks: A list of byte strings. Each call to read() consumes
         bytes from the front of the concatenated stream. ``in_waiting``
-        reports the size of the *current* chunk only (not the whole
-        remaining stream), to simulate data arriving in discrete bursts
-        from the OS driver.
+        reports the total number of bytes remaining across all
+        not-yet-consumed chunks, matching real pyserial semantics where
+        in_waiting reports the entire OS receive buffer, not just the
+        current burst.
     """
 
     def __init__(self, chunks):
@@ -31,9 +32,7 @@ class FakeSerial:
 
     @property
     def in_waiting(self):
-        if not self._chunks:
-            return 0
-        return len(self._chunks[0])
+        return sum(len(c) for c in self._chunks)
 
     def read(self, size=1):
         self.read_call_count += 1
@@ -56,6 +55,7 @@ class FrameReaderUnderTest(UsbModemPyserialConnector):
 
     def __init__(self, serial):
         self.serial = serial
+        self.packet_buffer = b''
 
 
 class UsbModemPyserialReadFrameTests(TestCase):
@@ -116,5 +116,38 @@ class UsbModemPyserialReadFrameTests(TestCase):
         serial = FakeSerial([])
         reader = FrameReaderUnderTest(serial)
 
-        with self.assertRaises(AssertionError):
+        with self.assertRaises(ConnectionError):
             reader._read_frame()
+
+    def test_read_frame_returns_one_frame_at_a_time_when_multiple_are_buffered(self):
+        # Multiple full HDLC frames arrive in the OS receive buffer at
+        # once (the normal case under load). _read_frame must return
+        # them one at a time, not merge them into a single blob.
+        hdlc = HdlcMixin()
+        frame1 = hdlc.hdlc_encapsulate(b'\x01\x02\x03')
+        frame2 = hdlc.hdlc_encapsulate(b'\x04\x05\x06')
+        frame3 = hdlc.hdlc_encapsulate(b'\x07\x08\x09')
+
+        serial = FakeSerial([frame1 + frame2 + frame3])
+        reader = FrameReaderUnderTest(serial)
+        reader.packet_buffer = b''
+
+        self.assertEqual(reader._read_frame(), frame1)
+        self.assertEqual(reader._read_frame(), frame2)
+        self.assertEqual(reader._read_frame(), frame3)
+
+    def test_read_frame_retains_partial_trailing_frame_for_next_call(self):
+        # A batch containing one full frame plus the start of a second
+        # (incomplete) frame must return only the complete frame, and
+        # retain the partial bytes for the next call.
+        hdlc = HdlcMixin()
+        frame1 = hdlc.hdlc_encapsulate(b'\xaa\xbb')
+        frame2 = hdlc.hdlc_encapsulate(b'\xcc\xdd')
+        partial_frame2 = frame2[:2]  # incomplete - no trailer yet
+
+        serial = FakeSerial([frame1 + partial_frame2, frame2[2:]])
+        reader = FrameReaderUnderTest(serial)
+        reader.packet_buffer = b''
+
+        self.assertEqual(reader._read_frame(), frame1)
+        self.assertEqual(reader._read_frame(), frame2)

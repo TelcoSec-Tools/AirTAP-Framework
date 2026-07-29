@@ -83,7 +83,9 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
         self.device = device
         
         self.received_first_packet = False
-        
+
+        self.packet_buffer = b''
+
         super().__init__()
     
     def detect_diag_interference(self, try_handle_modemmanager = True):
@@ -230,27 +232,30 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
             Read bytes from the serial port until a trailer byte is found,
             minimizing the number of read() calls by consuming all bytes
             already buffered by the OS/driver at once (via in_waiting),
-            instead of reading one byte per call.
+            instead of reading one byte per call. Any bytes read past the
+            first trailer (belonging to the next frame) are retained in
+            self.packet_buffer for the next call.
 
             :returns: The raw (still HDLC-escaped) frame, including the
                 trailing 0x7e byte.
-            :raises AssertionError: if the serial port returned no data
+            :raises ConnectionError: if the serial port returned no data
                 (closed or preempted by another process).
         """
 
-        raw_payload = bytearray()
-
-        while not raw_payload.endswith(self.TRAILER_CHAR):
+        while self.TRAILER_CHAR not in self.packet_buffer:
 
             bytes_waiting = self.serial.in_waiting
 
             chunk = self.serial.read(bytes_waiting if bytes_waiting > 0 else 1)
 
-            assert chunk
+            if not chunk:
+                raise ConnectionError('Serial port returned no data (closed or preempted)')
 
-            raw_payload += chunk
+            self.packet_buffer += chunk
 
-        return bytes(raw_payload)
+        raw_payload, self.packet_buffer = self.packet_buffer.split(self.TRAILER_CHAR, 1)
+
+        return raw_payload + self.TRAILER_CHAR
 
     def read_loop(self):
 

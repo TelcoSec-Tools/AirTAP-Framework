@@ -1,9 +1,129 @@
-*.pyc
+# ==============================================================================
+# AirTap Framework — Comprehensive .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Byte-compiled / Optimized / Binary Files
+# ------------------------------------------------------------------------------
 __pycache__/
-config.py
+*.py[cod]
+*$py.class
+*.so
+*.dll
+*.dylib
+*.exe
+*.manifest
+*.spec
+
+# ------------------------------------------------------------------------------
+# 2. Distribution, Packaging & Build Artifacts
+# ------------------------------------------------------------------------------
 build/
+develop-eggs/
 dist/
-*.egg-info
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ------------------------------------------------------------------------------
+# 3. Unit Test, Coverage & Benchmark Reports
+# ------------------------------------------------------------------------------
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# ------------------------------------------------------------------------------
+# 4. Virtual Environments & Configuration
+# ------------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.venv
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ------------------------------------------------------------------------------
+# 5. IDE, Editor & OS System Files
+# ------------------------------------------------------------------------------
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 .~lock.*
+.directory
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# ------------------------------------------------------------------------------
+# 6. Agent Workspaces, Scratch & System Caches
+# ------------------------------------------------------------------------------
 .worktrees/
 .superpowers/
+.remember/
+scratch/
+tmp/
+*.tmp
+
+# ------------------------------------------------------------------------------
+# 7. Diagnostic, Radio Captures & Runtime Dumps
+# ------------------------------------------------------------------------------
+# Cellular capture formats
+*.pcap
+*.pcapng
+*.cap
+*.dmp
+*.dlf
+*.qmdl
+*.qmdl2
+*.json_geo
+*.sdm
+*.elt
+*.log
+
+# Forensic dump outputs & fuzzing artifacts
+audit_log*.json
+fuzz_*.pcap
+fuzz_*.json
+fuzz.pcap
+efs_backup/
+mem_dump/
+nv_backup/
+
+# ------------------------------------------------------------------------------
+# 8. Whitelist / Preserved Fixtures & Documentation Samples
+# ------------------------------------------------------------------------------
+!docs/sample_pcaps/*
+!docs/screenshots/*
+!tests/fixtures/*

@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    name: Code Quality & Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install flake8
+
+      - name: Check Python syntax and fatal errors
+        run: |
+          python -m compileall src tests
+          # Stop the build if there are Python syntax errors or undefined names
+          flake8 src tests --count --select=E9,F63,F7,F82 --show-source --statistics
+
+  test:
+    name: Test on ${{ matrix.os }} (Python ${{ matrix.python-version }})
+    needs: lint
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12', '3.13']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install .[dev]
+
+      - name: Run test suite via pytest
+        run: python -m pytest -v
+
+      # The unittest entry point is what someone without pytest will reach for,
+      # so it has to keep working across all platforms.
+      - name: Run test suite via unittest runner
+        run: python tests/tests.py
+
+  build:
+    name: Build & Validate Distribution Artifacts
+    needs: test
+    # Release artifacts are built on Linux on purpose: a wheel built on Windows
+    # loses the executable bit on the bundled adb binaries and on run.sh, since
+    # setuptools reads the filesystem mode and NTFS has none to read. Linux
+    # checks those files out as 0755 from the git index, so the wheel keeps it.
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check package metadata with Twine
+        run: twine check dist/*
+
+      - name: Validate distribution contents
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel_files = glob.glob('dist/*.whl')
+          if not wheel_files:
+              sys.exit('Error: No wheel file found in dist/')
+
+          wheel = wheel_files[0]
+          archive = zipfile.ZipFile(wheel)
+          names = archive.namelist()
+
+          errors = []
+
+          # The Wireshark dissectors are required for 5G NR RRC/NAS dissection;
+          # verify they are correctly included in the wheel package_data.
+          lua_dissectors = [name for name in names if name.endswith('.lua')]
+          if not lua_dissectors:
+              errors.append('no Wireshark .lua dissectors found in the wheel')
+          else:
+              print(f"Found {len(lua_dissectors)} Wireshark Lua dissectors in wheel.")
+
+          # Verify bundled adb binaries and executable permissions
+          for required in ('adb_linux', 'adb_macos'):
+              matches = [name for name in names if name.endswith(required)]
+              if not matches:
+                  errors.append('%s missing from the wheel' % required)
+                  continue
+              mode = (archive.getinfo(matches[0]).external_attr >> 16) & 0o777
+              if not mode & 0o111:
+                  errors.append('%s is not executable in the wheel (mode %o)' % (required, mode))
+
+          if errors:
+              sys.exit('Release artifact check failed:\n  ' + '\n  '.join(errors))
+
+          print('Release artifact check passed successfully for %s' % wheel)
+          PY
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

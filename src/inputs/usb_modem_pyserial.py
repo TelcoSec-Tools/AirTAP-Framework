@@ -46,12 +46,6 @@ class UsbModemPyserialConnector(HdlcMixin, BaseInput):
     """
     
     def __init__(self, device):
-
-        # WIP
-        # <Implement Parser of USB-device syntax BEGIN>
-
-        # <Implement Parser of USB-device syntax END>
-        
         if platform not in ('win32', 'cygwin'):
             
             # Try to access the device

@@ -88,11 +88,11 @@ class UsbModemPyusbConnector(HdlcMixin, BaseInput):
                         exit()
                     sleep(2)
                     num_reconnect_retries += 1
+                    continue
 
                 else:
                     num_reconnect_retries = 0
-                
-                read_buffer += data_read
+                    read_buffer += data_read
             
             # Decapsulate and dispatch
             

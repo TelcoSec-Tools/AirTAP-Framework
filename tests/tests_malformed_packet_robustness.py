@@ -236,6 +236,28 @@ class DispatchRobustnessTests(TestCase):
         with self.assertRaises(KeyboardInterrupt):
             diag_input.dispatch_received_diag_packet(well_formed_diag_log_packet())
 
+    def test_broken_output_sink_is_not_swallowed(self):
+        """
+        A dead output sink (Wireshark closed its pipe) fails identically for
+        every subsequent packet. Swallowing it would log a traceback per packet
+        forever instead of shutting the capture down.
+        """
+
+        diag_input = make_input()
+        diag_input.add_module(ExplodingModule(BrokenPipeError('the pipe is gone')))
+
+        with self.assertRaises(BrokenPipeError):
+            diag_input.dispatch_received_diag_packet(well_formed_diag_log_packet())
+
+    def test_full_disk_on_output_is_not_swallowed(self):
+        from errno import ENOSPC
+
+        diag_input = make_input()
+        diag_input.add_module(ExplodingModule(OSError(ENOSPC, 'No space left on device')))
+
+        with self.assertRaises(OSError):
+            diag_input.dispatch_received_diag_packet(well_formed_diag_log_packet())
+
 
 class EfsShellCommandRobustnessTests(TestCase):
     """
@@ -281,6 +303,30 @@ class EfsShellCommandRobustnessTests(TestCase):
 
         self.assertTrue(any('ExplodingCommand' in line for line in captured.output),
             'expected the failing command to be named, got: %r' % captured.output)
+
+    def test_local_file_error_is_not_blamed_on_the_modem(self):
+        """
+        "put /nonexistent /efs/x" fails in the local open(), before the modem
+        is ever contacted. Reporting that as a bad device reply sends the user
+        looking in entirely the wrong place.
+        """
+
+        shell = self.make_shell()
+
+        class LocalFileCommand:
+            def execute_command(self, diag_input, args):
+                raise FileNotFoundError(2, 'No such file or directory', 'local_src.bin')
+
+        with self.assertLogs(getLogger(), level = WARNING) as captured:
+            shell._run_efs_command(LocalFileCommand(), None)
+
+        joined = '\n'.join(captured.output)
+        self.assertIn('LocalFileCommand', joined)
+        self.assertIn('local_src.bin', joined,
+            'the offending local path should be shown, got: %r' % captured.output)
+        self.assertNotIn('device', joined.lower(),
+            'a local file error must not be attributed to the device, got: %r'
+                % captured.output)
 
     def test_systemexit_from_command_is_still_absorbed(self):
         """
@@ -395,14 +441,18 @@ class Efs2FileTypeTests(TestCase):
     def test_unknown_file_type_returns_placeholder_instead_of_raising(self):
         from src.protocol.efs2 import efs2_file_type_name, EFS2_FILE_TYPES
 
-        # Find a file-type nibble that the table does not define
-        unknown_mode = next(candidate for candidate in range(0, 0o200000, 0o10000)
+        # Find a non-zero file-type value that the table does not define. Zero
+        # would make the assertion below vacuous, since '0' appears in any
+        # zero-padded octal rendering.
+        unknown_mode = next(candidate for candidate in range(0o10000, 0o200000, 0o10000)
             if candidate not in EFS2_FILE_TYPES)
 
         result = efs2_file_type_name(unknown_mode)
 
-        self.assertIn('%o' % (unknown_mode >> 12), result,
-            'the unknown type value should appear in the placeholder')
+        # The placeholder must show the type bits the way EFS2_FILE_TYPES
+        # spells them, so the value can be looked up against the table
+        self.assertIn('%06o' % unknown_mode, result,
+            'the unknown type value should appear in the placeholder as-is')
 
     def test_only_the_file_type_bits_are_considered(self):
         from src.protocol.efs2 import efs2_file_type_name, EFS2_FILE_TYPES

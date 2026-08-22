@@ -27,6 +27,9 @@ class MockFile:
     def write(self, data):
         self.data += data
 
+    def flush(self):
+        pass
+
     def close(self):
         pass
 

@@ -43,7 +43,10 @@ class CommandLineInterface:
     def on_init(self):
         
         print()
-        print('Welcome to the AirTap CLI. Type "help" for a list of available commands.')
+        print('======================================================================')
+        print('  AirTap Interactive CLI [ TelcoSec.net - https://telcosec.net ]')
+        print('  Type "help" for a list of available commands or "exit" to quit.')
+        print('======================================================================')
         print()
         
         command_to_module = {} # {"raw user-issued command": Module()}
@@ -69,6 +72,11 @@ class CommandLineInterface:
                     self.diag_input.shutdown_event.notify()
                 
                 return
+            
+            if line.strip().lower() in ('?', 'help', 'h', '-h', '--help'):
+                
+                self.print_help()
+                continue
             
             if line.strip().startswith('stop '):
                 

@@ -8,6 +8,7 @@ from struct import pack, unpack
 
 GSMTAP_PORT = 4729
 NR_RRC_UDP_PORT = 47928
+NR_NAS_UDP_PORT = 47929
 
 def build_gsmtap_ip(gsmtap_protocol, gsmtap_channel_type, payload, is_uplink):
     
@@ -43,6 +44,31 @@ def build_gsmtap_ip(gsmtap_protocol, gsmtap_channel_type, payload, is_uplink):
         0,0,0,0, # To 0.0.0.0
     ) + packet
 
+def build_sip_udp_ip(payload: bytes, is_uplink: bool = False):
+    SIP_PORT = 5060
+    packet = pack('>HHHH',
+        SIP_PORT,
+        SIP_PORT,
+        len(payload) + 8,
+        0
+    ) + payload
+
+    src_ip = (10, 0, 0, 1) if is_uplink else (10, 0, 0, 2)
+    dst_ip = (10, 0, 0, 2) if is_uplink else (10, 0, 0, 1)
+
+    return pack('>BBHHHBBH4B4B',
+        (4 << 4) | 5,
+        0,
+        len(packet) + 20,
+        0,
+        0,
+        64,
+        17,
+        0,
+        *src_ip,
+        *dst_ip
+    ) + packet
+
 def build_nr_rrc_log_ip(log_payload : bytes):
 
     # UDP:
@@ -71,6 +97,29 @@ def build_nr_rrc_log_ip(log_payload : bytes):
 
 
 
+def build_nr_nas_log_ip(log_payload: bytes):
+    packet = pack('>HHHH',
+        NR_NAS_UDP_PORT, # From custom AirTap 5G NAS plug-in UDP port
+        NR_NAS_UDP_PORT, # To custom AirTap 5G NAS plug-in UDP port
+        len(log_payload) + 8, # Total length
+        0 # Ignore checksum
+    ) + log_payload
+
+    return pack('>BBHHHBBH8B',
+        (4 << 4) | 5, # IPv4 version and header words
+        0, # DSCP
+        len(packet) + 20, # Total length
+        0, # Identification
+        0, # Fragment offset
+        64, # Time to live
+        17, # Protocol: UDP
+        0, # Ignore checksum
+        0,0,0,0, # From 0.0.0.0
+        0,0,0,0, # To 0.0.0.0
+    ) + packet
+
+
+
 GSMTAP_TYPE_UM = 0x01
 GSMTAP_TYPE_ABIS = 0x02
 GSMTAP_TYPE_GPRS_LLC = 0x07
@@ -82,6 +131,7 @@ GSMTAP_TYPE_NR_RRC = 0x13
 GSMTAP_TYPE_NR_MAC = 0x14
 GSMTAP_TYPE_NR_NAS = 0x15
 GSMTAP_LTE_NAS_PLAIN = 0
+GSMTAP_LTE_NAS_SEC_HEADER = 1
 
 GSMTAP_NR_RRC_SUB_BCCH_BCH = 0
 GSMTAP_NR_RRC_SUB_BCCH_DL_SCH = 1

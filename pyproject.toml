@@ -1,0 +1,91 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "airtap"
+dynamic = ["version", "readme"]
+description = "AirTap is a cellular radio diagnostics and packet capture framework for 2G/3G/4G/5G basebands"
+requires-python = ">=3.6"
+license = "GPL-3.0-only"
+authors = [
+    { name = "AirTap Team", email = "contact@telcosec.net" }
+]
+keywords = [
+    "cellular", "lte", "5g", "nr", "gsm", "umts", "baseband",
+    "qualcomm", "diag", "gsmtap", "wireshark", "pcap", "telecom", "security"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Telecommunications Industry",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Cellular Phone",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Security",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows"
+]
+dependencies = [
+    "pyserial>=3.5",
+    "pyusb>=1.2.1",
+    "crcmod>=1.7",
+    "pycrate>=0.7.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "build>=1.0.0",
+    "twine>=4.0.0",
+    "flake8>=6.0.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/AirTAP-Framework/AirTAP-Framework"
+Documentation = "https://github.com/AirTAP-Framework/AirTAP-Framework#readme"
+Repository = "https://github.com/AirTAP-Framework/AirTAP-Framework.git"
+"Issue Tracker" = "https://github.com/AirTAP-Framework/AirTAP-Framework/issues"
+Changelog = "https://github.com/AirTAP-Framework/AirTAP-Framework/blob/master/CHANGELOG.md"
+
+[project.scripts]
+airtap = "airtap.main:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "airtap.__version__" }
+readme = { file = "README.md", content-type = "text/markdown" }
+
+[tool.setuptools.package-dir]
+airtap = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+airtap = [
+    "inputs/adb_bridge/*",
+    "inputs/adb_wsl2_bridge/*",
+    "inputs/external/*",
+    "inputs/external/adb/*",
+    "inputs/external/adb/lib64/*",
+    "modules/wireshark_plugin/*.lua",
+    "modules/wireshark_plugin/*.py",
+    "modules/gui_assets/*"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["tests_*.py"]
+addopts = "--ignore=tests/tests.py -v"

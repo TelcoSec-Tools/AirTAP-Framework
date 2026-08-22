@@ -3,9 +3,21 @@
 from pycrate_core.utils import pack_val, TYPE_UINT
 from collections import defaultdict, namedtuple
 from pycrate_asn1dir import RRC3G
+try:
+    from pycrate_asn1dir import RRCLTE
+    RRCLTE.ASN1Obj._SILENT = True
+except Exception:
+    RRCLTE = None
+
+try:
+    from pycrate_asn1dir import RRCNR
+    RRCNR.ASN1Obj._SILENT = True
+except Exception:
+    RRCNR = None
+
 from ..protocol.log_types import *
 from traceback import format_exc
-from struct import pack, unpack
+from struct import pack, unpack, unpack_from, calcsize
 from logging import warning
 from time import time
 
@@ -169,14 +181,109 @@ class SIB:
 
 bearer_to_sib_type_to_sib = defaultdict(lambda: defaultdict(SIB))
 
-"""
-    Default callbacks when a SIB is decoded
-"""
+def format_sib_summary(sib_type, sib_dict, sfn = None):
+    lines = []
+    header = f"[+] {sib_type}"
+    if sfn is not None and sfn > 0:
+        header += f" (SFN: {sfn})"
+    lines.append(header)
+    
+    # Recursive extractor for cellular identity, cell access, emergency & RF fields
+    extracted = []
+    
+    def extract_info(obj):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k in ('mcc', 'mnc', 'plmn-Identity', 'cellIdentity', 'trackingAreaCode', 'tac',
+                         'freqBandIndicator', 'systemInfoValueTag', 'ims-EmergencySupport-r9',
+                         'cellReservedForOperatorUse', 'q-RxLevMin'):
+                    if isinstance(v, (str, int, bool)):
+                        extracted.append(f"    - {k}: {v}")
+                    elif k in ('mcc', 'mnc') and isinstance(v, (list, tuple)):
+                        extracted.append(f"    - {k.upper()}: {''.join(str(x) for x in v)}")
+                    elif isinstance(v, dict):
+                        extract_info(v)
+                elif k in ('sib-TypeAndInfo', 'schedulingInfoList', 'sib-MappingInfo'):
+                    if isinstance(v, (list, tuple)):
+                        sib_types = []
+                        for item in v:
+                            if isinstance(item, tuple) and len(item) > 0:
+                                sib_types.append(str(item[0]))
+                            elif isinstance(item, str):
+                                sib_types.append(item)
+                        if sib_types:
+                            extracted.append(f"    - SIB Scheduling: {', '.join(sib_types)}")
+                else:
+                    extract_info(v)
+        elif isinstance(obj, (list, tuple)):
+            for item in obj:
+                extract_info(item)
+
+    extract_info(sib_dict)
+    
+    if extracted:
+        # Remove duplicates while preserving order
+        seen = set()
+        for item in extracted:
+            if item not in seen:
+                seen.add(item)
+                lines.append(item)
+    else:
+        import pprint
+        lines.append("    " + pprint.pformat(sib_dict, indent = 2, width = 100).replace("\n", "\n    "))
+        
+    return "\n".join(lines)
+
+def audit_decoded_sib_security(sib_type: str, sib_dict: dict) -> list:
+    """Analyze decoded SIB structure for False Base Station (FBS) lure indicators."""
+    alerts = []
+    if not isinstance(sib_dict, dict):
+        return alerts
+
+    sib_str = str(sib_dict).lower()
+
+    # 1. Check for Forced 2G Downgrade via SIB7 (TELCOSEC-BADPRAC-002)
+    if 'sib7' in sib_type.lower() or 'type7' in sib_type.lower() or 'systeminformationblocktype7' in sib_str:
+        alerts.append(
+            "[CRITICAL] [TELCOSEC-BADPRAC-002] LTE SIB7 Active: Network broadcasting 2G GERAN neighbor carrier redirection. Potential forced cryptographic downgrade."
+        )
+
+    # 2. Check for Permissive q-RxLevMin Lure (TELCOSEC-BADPRAC-007)
+    # Search for q_rxlevmin or q-rxlevmin values in dictionary
+    for k, v in sib_dict.items():
+        if 'rxlevmin' in str(k).lower():
+            try:
+                val = int(v) * 2 if abs(int(v)) < 100 else int(v)
+                if val <= -130:
+                    alerts.append(
+                        f"[WARNING] [TELCOSEC-BADPRAC-007] Ultra-permissive q-RxLevMin ({val} dBm). Allows weak cell connection for subscriber capture."
+                    )
+            except Exception:
+                pass
+
+    # 3. Check for 2G Cell Reselection Offset (CRO) Inflation (TELCOSEC-BADPRAC-001)
+    for k, v in sib_dict.items():
+        if 'cro' in str(k).lower() or 'cellreselectionoffset' in str(k).lower():
+            try:
+                cro_db = int(v) * 2 if int(v) < 64 else int(v)
+                if cro_db >= 20:
+                    alerts.append(
+                        f"[HIGH] [TELCOSEC-BADPRAC-001] Elevated Cell Reselection Offset (+{cro_db} dB). Artificial priority boost luring mobile devices."
+                    )
+            except Exception:
+                pass
+
+    return alerts
 
 def print_decoded_sib(sib_type, sib_dict, sib_bytes, rrc_sfn, timestamp):
-    
     print()
-    print(sib_type, '=>', sib_dict)
+    summary = format_sib_summary(sib_type, sib_dict, rrc_sfn)
+    fbs_alerts = audit_decoded_sib_security(sib_type, sib_dict)
+    if fbs_alerts:
+        summary += "\n  [!] TelcoSec False Base Station (FBS) Warnings:"
+        for alert in fbs_alerts:
+            summary += f"\n      * {alert}"
+    print(summary)
 
 def print_sib_decoding_error(decoding_error):
     
@@ -332,5 +439,81 @@ class DecodedSibsDumper(EnableLogMixin):
                                         sib_schedule = SIBSchedule(sib_period, sib_position, num_segments)
                                         
                                         bearer_to_sib_schedule_to_sib_type[radio_bearer][sib_schedule] = sib_type
+
+        elif log_type == LOG_LTE_RRC_OTA_MSG_LOG_C: # 0xb0c0
+            if RRCLTE is None:
+                return
+            try:
+                (ext_header_ver, rrc_rel, rrc_ver, bearer_id, phy_cellid), ext_header = unpack('<BBBBH', log_payload[:6]), log_payload[6:]
+                if ext_header_ver >= 25:
+                    (ext_header_ver, rrc_rel, rrc_ver, nc_rrc_rel, bearer_id, phy_cellid), ext_header = unpack('<BBBHBH', log_payload[:8]), log_payload[8:]
+                freq_type = 'H' if ext_header_ver < 8 else 'I'
+                header_spec = '<' + freq_type + 'HBH'
+                if unpack_from('<H', ext_header, calcsize(header_spec) - 2)[0] != len(ext_header) - calcsize(header_spec):
+                    header_spec = '<' + freq_type + 'HB4xH'
+                (freq, sfn, channel_type, length), packet = unpack_from(header_spec, ext_header), ext_header[calcsize(header_spec):]
+
+                if channel_type in (254, 255):
+                    return
+
+                if LTE_UL_DCCH_NB < channel_type <= LTE_UL_DCCH_NB + 9:
+                    channel_type -= 9
+
+                is_bcch_bch = (channel_type in (LTE_BCCH_BCH_v0, LTE_BCCH_BCH_v9, LTE_BCCH_BCH_v14, LTE_BCCH_BCH_v19, LTE_BCCH_BCH_NB))
+                is_bcch_dl_sch = (channel_type in (LTE_BCCH_DL_SCH_v0, LTE_BCCH_DL_SCH_v9, LTE_BCCH_DL_SCH_v14, LTE_BCCH_DL_SCH_v19, LTE_BCCH_DL_SCH_NB))
+
+                if is_bcch_bch:
+                    rrc_obj = RRCLTE.EUTRA_RRC_Definitions.BCCH_BCH_Message
+                    rrc_obj.from_uper(packet)
+                    decoded_dict = rrc_obj()
+                    self.on_decoded_sib('LTE_MasterInformationBlock', decoded_dict, packet, sfn, timestamp)
+                elif is_bcch_dl_sch:
+                    rrc_obj = RRCLTE.EUTRA_RRC_Definitions.BCCH_DL_SCH_Message
+                    rrc_obj.from_uper(packet)
+                    decoded_dict = rrc_obj()
+                    msg_choice = decoded_dict.get('message', {})
+                    sib_name = 'LTE_SystemInformation'
+                    if isinstance(msg_choice, tuple) and len(msg_choice) > 0:
+                        sib_name = f'LTE_{msg_choice[0]}'
+                    elif isinstance(msg_choice, dict) and 'c1' in msg_choice:
+                        c1 = msg_choice['c1']
+                        if isinstance(c1, tuple):
+                            sib_name = f'LTE_{c1[0]}'
+                    self.on_decoded_sib(sib_name, decoded_dict, packet, sfn, timestamp)
+            except Exception:
+                pass
+
+        elif log_type == LOG_NR_RRC_OTA_MSG_LOG_C: # 0xb821
+            if RRCNR is None:
+                return
+            try:
+                (version,), ext_header = unpack('<B', log_payload[:1]), log_payload[1:]
+                if version >= 1:
+                    sfn, slot, channel_type, pdu_len = unpack_from('<HHHH', ext_header)
+                    packet = ext_header[8:8 + pdu_len]
+                else:
+                    channel_type, pdu_len = unpack_from('<HH', ext_header)
+                    packet = ext_header[4:4 + pdu_len]
+
+                if channel_type == NR_BCCH_BCH:
+                    rrc_obj = RRCNR.NR_RRC_Definitions.BCCH_BCH_Message
+                    rrc_obj.from_uper(packet)
+                    decoded_dict = rrc_obj()
+                    self.on_decoded_sib('NR_MasterInformationBlock', decoded_dict, packet, sfn if version >= 1 else 0, timestamp)
+                elif channel_type == NR_BCCH_DL_SCH:
+                    rrc_obj = RRCNR.NR_RRC_Definitions.BCCH_DL_SCH_Message
+                    rrc_obj.from_uper(packet)
+                    decoded_dict = rrc_obj()
+                    msg_choice = decoded_dict.get('message', {})
+                    sib_name = 'NR_SystemInformation'
+                    if isinstance(msg_choice, tuple) and len(msg_choice) > 0:
+                        sib_name = f'NR_{msg_choice[0]}'
+                    elif isinstance(msg_choice, dict) and 'c1' in msg_choice:
+                        c1 = msg_choice['c1']
+                        if isinstance(c1, tuple):
+                            sib_name = f'NR_{c1[0]}'
+                    self.on_decoded_sib(sib_name, decoded_dict, packet, sfn if version >= 1 else 0, timestamp)
+            except Exception:
+                pass
             
             

@@ -38,7 +38,7 @@ def efs2_file_type_name(mode : int) -> str:
 
     file_type = mode & 0o170000
 
-    return EFS2_FILE_TYPES.get(file_type, 'Unknown (0o%o)' % (file_type >> 12))
+    return EFS2_FILE_TYPES.get(file_type, 'Unknown (0o%06o)' % file_type)
 
 EFS2_DIAG_HELLO = 0
 EFS2_DIAG_QUERY = 1

@@ -1,0 +1,101 @@
+-- TelcoSec.net - GPRS Logical Link Control (LLC) & GEA Cipher Downgrade Dissector
+-- Description: Dissects GPRS LLC frames (3GPP TS 44.064).
+--              Analyzes GPRS encryption negotiation and flags forced GEA0 (Null-cipher / plaintext)
+--              and GEA1 (cryptographically broken cipher) downgrades.
+
+local ok, gprs_llc_proto = pcall(Proto, "gprs_llc_sec", "TelcoSec GPRS LLC & GEA Cipher Analyzer")
+if not ok or not gprs_llc_proto then return end
+
+-- Protocol fields
+local f_sapi         = ProtoField.uint8("gprs_llc_sec.sapi", "LLC SAPI", base.DEC)
+local f_frame_type   = ProtoField.string("gprs_llc_sec.frame_type", "Frame Type")
+local f_nu           = ProtoField.uint16("gprs_llc_sec.nu", "N(U) Unconfirmed Sequence", base.DEC)
+local f_cipher_algo  = ProtoField.string("gprs_llc_sec.cipher_algo", "Negotiated GEA Cipher")
+local f_fcs          = ProtoField.uint24("gprs_llc_sec.fcs", "Frame Check Sequence (FCS)", base.HEX)
+local f_sec_alert    = ProtoField.string("gprs_llc_sec.alert", "TelcoSec GPRS Security Alert")
+local f_payload      = ProtoField.bytes("gprs_llc_sec.payload", "LLC Information Payload")
+
+gprs_llc_proto.fields = {
+    f_sapi,
+    f_frame_type,
+    f_nu,
+    f_cipher_algo,
+    f_fcs,
+    f_sec_alert,
+    f_payload
+}
+
+-- Mapping GPRS LLC SAPI
+local LLC_SAPIS = {
+    [1]  = "GMM (GPRS Mobility Management)",
+    [3]  = "SNDCP (User Plane IP / Data)",
+    [5]  = "SNDCP (User Plane IP / Data)",
+    [7]  = "SMS (Short Message Service over GPRS)",
+    [8]  = "TOM (Tunneling of Messages)",
+    [9]  = "SNDCP (User Plane IP / Data)",
+    [11] = "SNDCP (User Plane IP / Data)"
+}
+
+-- Native GPRS dissectors
+local gprs_sndcp_dissector = Dissector.get("sndcp")
+
+function gprs_llc_proto.dissector(tvb, pinfo, tree)
+    -- GPRS LLC Header Layout:
+    -- [0]: Address Field (Bit 6=PD, Bits 3-0=SAPI)
+    -- [1-2]: Control Field (UI, I, S, or U frame)
+    -- [3..N-3]: Information Field
+    -- [N-3..N]: FCS (3 bytes)
+    if tvb:len() < 4 then return end
+
+    pinfo.cols.protocol = "GPRS LLC"
+
+    local addr_byte = tvb(0, 1):uint()
+    local sapi = bit.band(addr_byte, 0x0F)
+    local sapi_name = LLC_SAPIS[sapi] or string.format("SAPI %d", sapi)
+
+    local ctrl_byte = tvb(1, 1):uint()
+    local frame_type = "UI (Unconfirmed Information)"
+    if bit.band(ctrl_byte, 0x01) == 0 then
+        frame_type = "I (Information)"
+    elseif bit.band(ctrl_byte, 0x03) == 1 then
+        frame_type = "S (Supervisory)"
+    elseif bit.band(ctrl_byte, 0x03) == 3 then
+        frame_type = "U (Unnumbered / XID)"
+    end
+
+    local subtree = tree:add(gprs_llc_proto, tvb(), string.format("GPRS LLC: %s (%s)", frame_type, sapi_name))
+    subtree:add(f_sapi, tvb(0, 1), sapi):append_text(string.format(" (%s)", sapi_name))
+    subtree:add(f_frame_type, frame_type)
+
+    pinfo.cols.info = string.format("[GPRS LLC] %s | %s", frame_type, sapi_name)
+
+    -- Security Heuristic 1: XID Parameter Negotiation (GEA Cipher Selection)
+    if frame_type == "U (Unnumbered / XID)" and tvb:len() >= 6 then
+        local hex_str = tostring(tvb:bytes():tohex())
+        if string.find(hex_str, "0000") or string.find(hex_str, "0100") then
+            subtree:add(f_cipher_algo, "GEA0 (No Encryption / Plaintext)")
+            subtree:add(f_sec_alert, "[CRITICAL] Network forced GEA0 (Null Encryption)! All 2G/GPRS user data, DNS, and IP traffic transmitted in plaintext.")
+            pinfo.cols.info:append(" [TELCOSEC: GEA0 NULL-CIPHER DETECTED!]")
+        elseif string.find(hex_str, "0101") then
+            subtree:add(f_cipher_algo, "GEA1 (Cryptographically Broken Cipher)")
+            subtree:add(f_sec_alert, "[WARNING] GEA1 cipher negotiated. GEA1 has intentional 40-bit weakness crackable in real-time.")
+        elseif string.find(hex_str, "0102") then
+            subtree:add(f_cipher_algo, "GEA2 (Legacy 64-bit Cipher)")
+        elseif string.find(hex_str, "0103") then
+            subtree:add(f_cipher_algo, "GEA3 (128-bit Kasumi Cipher - Secure)")
+        end
+    end
+
+    local offset = 3
+    local payload_len = tvb:len() - offset - 3 -- Minus 3 bytes FCS
+    if payload_len > 0 then
+        local payload_tvb = tvb(offset, payload_len):tvb()
+
+        -- SAPI 3, 5, 9, 11 are SNDCP user plane data
+        if (sapi == 3 or sapi == 5 or sapi == 9 or sapi == 11) and gprs_sndcp_dissector then
+            gprs_sndcp_dissector:call(payload_tvb, pinfo, tree)
+        else
+            subtree:add(f_payload, tvb(offset, payload_len))
+        end
+    end
+end

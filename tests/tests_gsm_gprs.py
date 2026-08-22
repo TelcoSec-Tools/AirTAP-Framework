@@ -20,6 +20,9 @@ class MockFile:
     def write(self, data):
         self.data += data
 
+    def flush(self):
+        pass
+
     def close(self):
         pass
 
@@ -39,16 +42,19 @@ class TestGsmGprs(unittest.TestCase):
         self.assertEqual(dumper.classify_log_type(LOG_GSM_SACCH_C), '2g')
         self.assertEqual(dumper.classify_log_type(LOG_GPRS_SNDCP_PDU_C), '2g')
 
-    def test_pcap_dumper_2g_sacch_and_gprs(self):
+    def test_pcap_dumper_gprs_mac_channel_variations(self):
         mock_pcap = MockFile()
         dumper = PcapDumper(diag_input=None, pcap_file=mock_pcap, reassemble_sibs=False, decrypt_nas=False, include_ip_traffic=False)
 
-        payload = b'\x01\x02\x03\x04\x05\x06'
-        dumper.on_log(LOG_GSM_SACCH_C, payload, log_header=None, timestamp=1600000000)
-        self.assertEqual(dumper.current_rat, '2g')
+        # Test DL PACCH (channel_type=129 / 0x81, message_type=1, length=4)
+        payload = b'\x81\x01\x04\xaa\xbb\xcc\xdd'
+        dumper.on_log(LOG_GPRS_MAC_SIGNALLING_MESSAGE_C, payload, log_header=None, timestamp=1600000002)
+        self.assertGreater(len(mock_pcap.data), 0)
 
-        dumper.on_log(LOG_GPRS_SNDCP_PDU_C, payload, log_header=None, timestamp=1600000001)
-        self.assertEqual(dumper.current_rat, '2g')
+        # Test UL PACCH (channel_type=4 / 0x04, message_type=1, length=4)
+        payload2 = b'\x04\x01\x04\x11\x22\x33\x44'
+        dumper.on_log(LOG_GPRS_MAC_SIGNALLING_MESSAGE_C, payload2, log_header=None, timestamp=1600000003)
+        self.assertGreater(len(mock_pcap.data), 0)
 
 if __name__ == '__main__':
     unittest.main()

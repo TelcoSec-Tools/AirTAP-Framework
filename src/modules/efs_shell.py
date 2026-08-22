@@ -27,10 +27,15 @@ from .efs_shell_commands.mv import MvCommand
 from .efs_shell_commands.ln import LnCommand
 from .efs_shell_commands.rm import RmCommand
 from .efs_shell_commands.ls import LsCommand
+from .efs_shell_commands.find import FindCommand
+from .efs_shell_commands.tree import TreeCommand
+from .efs_shell_commands.statfs import StatfsCommand
+from .efs_shell_commands.grep import GrepCommand
 
-ALL_COMMAND_CLASSES = [CatCommand, LsCommand, GetCommand, PutCommand, RmCommand, ChmodCommand, MkdirCommand, MvCommand, LnCommand,
-    DeviceInfoCommand, StatCommand]
-# "Md5sumCommand" is currently not used, it returns an invalid packet on my device
+ALL_COMMAND_CLASSES = [
+    CatCommand, LsCommand, GetCommand, PutCommand, RmCommand, ChmodCommand, MkdirCommand, MvCommand, LnCommand,
+    DeviceInfoCommand, StatCommand, FindCommand, TreeCommand, StatfsCommand, GrepCommand, Md5sumCommand
+]
 
 class EfsShell:
     
@@ -54,6 +59,11 @@ class EfsShell:
         
     def on_init(self):
         
+        print()
+        print('======================================================================')
+        print('  AirTap Embedded Filesystem (EFS) Shell [ TelcoSec.net - https://telcosec.net ]')
+        print('  Type "help" for a list of EFS commands or "exit" to quit.')
+        print('======================================================================')
         print()
         
         self.setup_readline()
@@ -131,8 +141,10 @@ class EfsShell:
         IndexError. That should cost the user one command and a diagnostic,
         then return them to the prompt - losing the whole interactive session
         (and its readline history) to a single odd packet is a much worse
-        outcome. SystemExit keeps its pre-existing meaning of "this command is
-        done"; KeyboardInterrupt is left to propagate so Ctrl-C still works.
+        outcome. OSError is reported separately, because it means a local file
+        operation failed rather than the modem misbehaving. SystemExit keeps its
+        pre-existing meaning of "this command is done"; KeyboardInterrupt is
+        left to propagate so Ctrl-C still works.
     """
 
     def _run_efs_command(self, command_object : BaseEfsShellCommand, parsed_args : Optional[Namespace]):
@@ -144,6 +156,14 @@ class EfsShell:
         except SystemExit:
 
             pass
+
+        except OSError as error:
+
+            # A local file operation failed (the "put" source doesn't exist,
+            # the "get" destination isn't writable, ...). Blaming the modem for
+            # a path typo sends the user looking in the wrong place.
+
+            warning('The %s command failed on a local file: %s', type(command_object).__name__, error)
 
         except Exception:
 

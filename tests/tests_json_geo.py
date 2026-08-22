@@ -1,61 +1,74 @@
 #!/usr/bin/python3
+#-*- encoding: Utf-8 -*-
+
 import unittest
+from struct import pack
 import io
 import json
-from base64 import b64encode
+
+from src.protocol.log_types import (
+    LOG_GNSS_POSITION_REPORT_C,
+    LOG_GNSS_NMEA_REPORT_C,
+    LOG_CG_LCS_POSITION_ESTIMATE_C,
+    LOG_LTE_NAS_EMM_OTA_IN_MSG_LOG_C,
+)
 from src.modules.json_geo_dump import JsonGeoDumper
-from src.inputs.json_geo_read import JsonGeoReader
 
-class MockInput:
-    def __init__(self):
-        self.lat = 48.8566
-        self.lng = 2.3522
 
-    def get_gps_location(self):
-        return self.lat, self.lng
+class TestJsonGeoDumper(unittest.TestCase):
 
-class TestJsonGeo(unittest.TestCase):
+    def setUp(self):
+        self.output = io.StringIO()
+        self.dumper = JsonGeoDumper(diag_input=None, json_geo_file=self.output)
 
-    def test_json_geo_dumper_and_reader(self):
-        buf = io.StringIO()
-        mock_input = MockInput()
-        dumper = JsonGeoDumper(diag_input=mock_input, json_geo_file=buf)
-        dumper.lat, dumper.lng = 48.8566, 2.3522
+    def test_gnss_binary_position_report_parsing(self):
+        # Layout: version=1 (1B), fix_type=2 (3D Fix, 1B), sat_count=9 (1B), lat=48.858844 (8B double), lon=2.294351 (8B double), alt=35.5 (4B float)
+        payload = pack('<BBBddf', 1, 2, 9, 48.858844, 2.294351, 35.5)
+        self.dumper.on_log(LOG_GNSS_POSITION_REPORT_C, payload, None, timestamp=1600000000.0)
 
-        # Create dummy log frame: 12B header + payload
-        dummy_header = b'\x00' * 12
-        dummy_payload = b'\x01\x02\x03\x04'
-        log_code = 0xb0c0 # LOG_LTE_RRC_OTA_MSG_LOG_C
+        self.assertEqual(self.dumper.lat, 48.858844)
+        self.assertEqual(self.dumper.lng, 2.294351)
+        self.assertEqual(self.dumper.alt, 35.5)
+        self.assertEqual(self.dumper.fix_type, '3D Fix')
+        self.assertEqual(self.dumper.sat_count, 9)
+        self.assertEqual(self.dumper.gnss_source, 'BASEBAND_GNSS')
 
-        dumper.on_log(log_code, dummy_payload, dummy_header, timestamp=1600000000)
-
-        json_output = buf.getvalue()
-        self.assertTrue(len(json_output) > 0)
-        lines = json_output.strip().split('\n')
+        lines = self.output.getvalue().strip().splitlines()
         self.assertEqual(len(lines), 1)
-
         record = json.loads(lines[0])
-        self.assertEqual(record['log_type'], log_code)
-        self.assertEqual(record['lat'], 48.8566)
-        self.assertEqual(record['lng'], 2.3522)
+        self.assertEqual(record['geo_source'], 'BASEBAND_GNSS')
+        self.assertEqual(record['lat'], 48.858844)
+        self.assertEqual(record['lng'], 2.294351)
+        self.assertEqual(record['alt_m'], 35.5)
 
-        # Test reading back with JsonGeoReader
-        buf_read = io.StringIO(json_output)
-        reader = JsonGeoReader(buf_read)
+    def test_gnss_nmea_stream_parsing(self):
+        # NMEA $GPGGA Sentence: 48 deg 51.53064 min N, 2 deg 17.66106 min E, Fix=1, Sats=8, Alt=42.0m
+        nmea_payload = b"$GPGGA,123519,4851.53064,N,00217.66106,E,1,08,0.9,42.0,M,46.9,M,,*47\r\n"
+        self.dumper.on_log(LOG_GNSS_NMEA_REPORT_C, nmea_payload, None, timestamp=1600000000.0)
 
-        dispatched_logs = []
-        def mock_dispatch(log_type, payload, header, timestamp):
-            dispatched_logs.append((log_type, payload, header, timestamp))
+        self.assertAlmostEqual(self.dumper.lat, 48.858844, places=4)
+        self.assertAlmostEqual(self.dumper.lng, 2.294351, places=4)
+        self.assertEqual(self.dumper.sat_count, 8)
+        self.assertEqual(self.dumper.fix_type, '3D Fix')
+        self.assertEqual(self.dumper.gnss_source, 'BASEBAND_NMEA')
 
-        reader.dispatch_diag_log = mock_dispatch
-        reader.read_loop()
+    def test_cellular_packet_tagged_with_gnss_coordinates(self):
+        # Set baseband position
+        payload = pack('<BBBddf', 1, 2, 7, 51.5074, -0.1278, 15.0)
+        self.dumper.on_log(LOG_GNSS_POSITION_REPORT_C, payload, None, timestamp=1600000000.0)
 
-        self.assertEqual(len(dispatched_logs), 1)
-        self.assertEqual(dispatched_logs[0][0], log_code)
-        self.assertEqual(dispatched_logs[0][1], dummy_payload)
-        self.assertEqual(dispatched_logs[0][2], dummy_header)
-        self.assertEqual(reader.latitude, 48.8566)
-        self.assertEqual(reader.longitude, 2.3522)
+        # Log a cellular signaling frame
+        cell_payload = b"\x01\x02\x03\x04"
+        self.dumper.on_log(LOG_LTE_NAS_EMM_OTA_IN_MSG_LOG_C, cell_payload, b"\x00\x00", timestamp=1600000001.0)
+
+        lines = self.output.getvalue().strip().splitlines()
+        self.assertEqual(len(lines), 2)
+        cell_record = json.loads(lines[1])
+        self.assertEqual(cell_record['log_type'], LOG_LTE_NAS_EMM_OTA_IN_MSG_LOG_C)
+        self.assertEqual(cell_record['lat'], 51.5074)
+        self.assertEqual(cell_record['lng'], -0.1278)
+        self.assertEqual(cell_record['geo_source'], 'BASEBAND_GNSS')
+
 
 if __name__ == '__main__':
     unittest.main()

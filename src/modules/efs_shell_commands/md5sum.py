@@ -33,7 +33,7 @@ class Md5sumCommand(BaseEfsShellCommand):
         
         opcode, payload = diag_input.send_recv(DIAG_SUBSYS_CMD_F, pack('<BHH',
             DIAG_SUBSYS_FS, # Command subsystem number
-            EFS2_DIAG_MKDIR,
+            EFS2_DIAG_MD5SUM,
             sequence_number
         ) + args.path.encode('latin1').decode('unicode_escape').encode('latin1') + b'\x00', accept_error = True)
         

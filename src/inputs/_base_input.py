@@ -183,6 +183,10 @@ class BaseInput:
             
             self.read_loop()
         
+        except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, EOFError) as e:
+            
+            warning('DIAG connection closed by remote host: %s' % e)
+        
         except Exception:
             
             error(format_exc())
@@ -288,6 +292,10 @@ class BaseInput:
                         break
                 
                 if not response_received:
+                    if accept_error or self.program_is_terminating:
+                        debug('Diag request %s with payload %s timed out (accept_error=%s, terminating=%s)',
+                              get_message_name(req_opcode), repr(req_payload), accept_error, self.program_is_terminating)
+                        return req_opcode, b''
                     
                     error('Error: Diag request %s with payload %s timed out' % (
                         get_message_name(req_opcode),
@@ -452,7 +460,7 @@ class BaseInput:
         are how AirTap is asked to shut down.
     """
 
-    def _dispatch_to_modules(self, callback_name, packet_description, *args):
+    def _dispatch_to_modules(self, callback_name, description_format, description_args, *args):
 
         for module in self.modules:
 
@@ -466,31 +474,43 @@ class BaseInput:
 
                 callback(*args)
 
+            except OSError:
+
+                # The module's output sink is gone for good (Wireshark closed
+                # its pipe, the pcap file's filesystem is full, ...). Every
+                # subsequent packet would hit the same error, so let this reach
+                # _read_thread and shut the capture down instead of logging a
+                # traceback forever.
+
+                raise
+
             except Exception:
 
                 warning('Module %s failed to process %s, ignoring this packet:\n%s',
-                    type(module).__name__, packet_description, format_exc())
+                    type(module).__name__, description_format % description_args, format_exc())
 
     def dispatch_diag_log(self, log_type, log_payload, log_header, timestamp):
 
         debug('[<] Received log 0x%04x of length %d: %s', log_type, len(log_payload), log_payload)
 
-        self._dispatch_to_modules('on_log', 'log 0x%04x' % log_type,
+        self._dispatch_to_modules('on_log', 'log 0x%04x', (log_type,),
             log_type, log_payload, log_header, timestamp)
 
     def dispatch_diag_event(self, event_id, event_payload, timestamp):
 
         debug('[<] Received event 0x%04x of length %d: %s', event_id, len(event_payload), event_payload)
 
-        self._dispatch_to_modules('on_event', 'event 0x%04x' % event_id,
+        self._dispatch_to_modules('on_event', 'event 0x%04x', (event_id,),
             event_id, event_payload, timestamp)
 
 
     def dispatch_diag_message(self, opcode, payload):
         
-        debug('[<] Received message with opcode %s of length %d: %s', get_message_name(opcode), len(payload), payload)
+        message_name = get_message_name(opcode)
 
-        self._dispatch_to_modules('on_message', 'message %s' % get_message_name(opcode),
+        debug('[<] Received message with opcode %s of length %d: %s', message_name, len(payload), payload)
+
+        self._dispatch_to_modules('on_message', 'message %s', (message_name,),
             opcode, payload)
 
     
@@ -516,6 +536,10 @@ class BaseInput:
                             
                             module.on_deinit()
                     
+                    except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError, EOFError, OSError) as e:
+
+                        debug('Could not send deinit command over disconnected interface: %s' % e)
+
                     except Exception:
 
                         error(format_exc())

@@ -29,6 +29,9 @@ class MockFile:
     def write(self, data):
         self.data += data
 
+    def flush(self):
+        pass
+
     def close(self):
         pass
 
@@ -78,20 +81,25 @@ class Test5GNR(unittest.TestCase):
         dumper.on_log(LOG_NR_NAS_5GMM_OTA_OUT_MSG_LOG_C, log_payload, log_header=None, timestamp=1600000001)
         self.assertEqual(dumper.current_rat, '5g')
 
-    def test_pcap_dumper_5g_nr_mac_log(self):
-        from src.protocol.log_types import LOG_NR_MAC_PDU_LOG_C, LOG_NR_MAC_RACH_TRIGGER_LOG_C, LOG_NR_SDAP_PDU_LOG_C
+    def test_pcap_dumper_lte_nas_sec_header(self):
+        from src.protocol.log_types import (
+            LOG_LTE_NAS_EMM_OTA_IN_MSG_LOG_C,
+            LOG_LTE_NAS_EMM_SEC_OTA_IN_MSG_LOG_C,
+        )
+        from src.protocol.gsmtap import GSMTAP_LTE_NAS_SEC_HEADER, GSMTAP_LTE_NAS_PLAIN
         mock_pcap = MockFile()
-        dumper = PcapDumper(diag_input=None, pcap_file=mock_pcap, reassemble_sibs=False, decrypt_nas=False, include_ip_traffic=False)
+        dumper = PcapDumper(diag_input=None, pcap_file=mock_pcap, reassemble_sibs=False, decrypt_nas=True, include_ip_traffic=False)
 
-        mac_payload = b'\x00\x01\x02\x03\x04\x05'
-        dumper.on_log(LOG_NR_MAC_PDU_LOG_C, mac_payload, log_header=None, timestamp=1600000000)
-        self.assertEqual(dumper.current_rat, '5g')
-
-        dumper.on_log(LOG_NR_MAC_RACH_TRIGGER_LOG_C, mac_payload, log_header=None, timestamp=1600000001)
-        self.assertEqual(dumper.current_rat, '5g')
-
-        dumper.on_log(LOG_NR_SDAP_PDU_LOG_C, mac_payload, log_header=None, timestamp=1600000002)
-        self.assertEqual(dumper.current_rat, '5g')
+        # Plain NAS message (EMM Attach Request)
+        plain_nas = b'\x07\x41\x01\x02\x03\x04'
+        hdr = pack('<BBBB', 1, 0, 0, 0)
+        dumper.on_log(LOG_LTE_NAS_EMM_OTA_IN_MSG_LOG_C, hdr + plain_nas, log_header=None, timestamp=1600000000)
+        
+        # Security protected NAS message (Security Header Type = 1, Protocol Discriminator = 7)
+        sec_nas = b'\x17\xaa\xbb\xcc\xdd\x01\x07\x41\x01\x02\x03\x04'
+        dumper.on_log(LOG_LTE_NAS_EMM_SEC_OTA_IN_MSG_LOG_C, hdr + sec_nas, log_header=None, timestamp=1600000001)
+        self.assertEqual(dumper.current_rat, '4g')
+        self.assertGreater(len(mock_pcap.data), 100)
 
 
 if __name__ == '__main__':

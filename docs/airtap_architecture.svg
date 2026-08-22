@@ -1,0 +1,254 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 740" width="1200" height="740">
+  <defs>
+    <!-- Gradients -->
+    <linearGradient id="canvasGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c16"/>
+      <stop offset="100%" stop-color="#020408"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#121a2d"/>
+      <stop offset="100%" stop-color="#0c1220"/>
+    </linearGradient>
+    <linearGradient id="cyanGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00f0ff"/>
+      <stop offset="100%" stop-color="#0080ff"/>
+    </linearGradient>
+    <linearGradient id="greenGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#00e676"/>
+      <stop offset="100%" stop-color="#00b0ff"/>
+    </linearGradient>
+    <linearGradient id="purpleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d500f9"/>
+      <stop offset="100%" stop-color="#651fff"/>
+    </linearGradient>
+    <linearGradient id="orangeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ff9100"/>
+      <stop offset="100%" stop-color="#ff3d00"/>
+    </linearGradient>
+
+    <!-- Filters -->
+    <filter id="cardGlow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+    <filter id="neonCyan" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Markers -->
+    <marker id="arrowCyan" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 0 L 8 4 L 0 8 z" fill="#00f0ff"/>
+    </marker>
+    <marker id="arrowGreen" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 0 L 8 4 L 0 8 z" fill="#00e676"/>
+    </marker>
+    <marker id="arrowPurple" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M 0 0 L 8 4 L 0 8 z" fill="#d500f9"/>
+    </marker>
+  </defs>
+
+  <style>
+    .title { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-weight: 800; font-size: 26px; fill: #ffffff; letter-spacing: 1px; }
+    .subtitle { font-family: 'JetBrains Mono', monospace; font-size: 13px; fill: #00f0ff; letter-spacing: 2px; }
+    .layer-title { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-weight: 700; font-size: 16px; fill: #ffffff; }
+    .layer-sub { font-family: 'JetBrains Mono', monospace; font-size: 11px; fill: #8899b5; }
+    .box-title { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; font-weight: 700; font-size: 14px; fill: #ffffff; }
+    .box-desc { font-family: 'JetBrains Mono', monospace; font-size: 11px; fill: #8da2c0; line-height: 1.4; }
+    .badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; }
+  </style>
+
+  <!-- Background Canvas -->
+  <rect width="1200" height="740" fill="url(#canvasGrad)"/>
+  
+  <!-- Subtle Grid Pattern -->
+  <g stroke="#ffffff" stroke-width="0.5" stroke-opacity="0.04">
+    <line x1="0" y1="100" x2="1200" y2="100"/>
+    <line x1="0" y1="260" x2="1200" y2="260"/>
+    <line x1="0" y1="420" x2="1200" y2="420"/>
+    <line x1="0" y1="580" x2="1200" y2="580"/>
+    <line x1="300" y1="80" x2="300" y2="740"/>
+    <line x1="600" y1="80" x2="600" y2="740"/>
+    <line x1="900" y1="80" x2="900" y2="740"/>
+  </g>
+
+  <!-- Header Section -->
+  <g transform="translate(40, 32)">
+    <!-- Logo Badge -->
+    <rect width="42" height="42" rx="10" fill="#0f192c" stroke="#00f0ff" stroke-width="1.5"/>
+    <path d="M21 8 L32 13 C32 26 21 34 21 34 C21 34 10 26 10 13 Z" fill="none" stroke="#00f0ff" stroke-width="1.8"/>
+    <circle cx="21" cy="20" r="3" fill="#00f0ff"/>
+
+    <text x="56" y="24" class="title">AIRTAP <tspan fill="#00f0ff">FRAMEWORK</tspan></text>
+    <text x="56" y="40" class="subtitle">CELLULAR BASEBAND DIAGNOSTICS &amp; RADIO SECURITY ARCHITECTURE</text>
+    
+    <!-- Top Badges -->
+    <g transform="translate(860, 6)">
+      <rect width="110" height="24" rx="6" fill="#142036" stroke="#00f0ff" stroke-width="1"/>
+      <text x="55" y="16" text-anchor="middle" class="badge" fill="#00f0ff">3GPP Rel-17</text>
+
+      <rect x="120" width="130" height="24" rx="6" fill="#142036" stroke="#00e676" stroke-width="1"/>
+      <text x="185" y="16" text-anchor="middle" class="badge" fill="#00e676">TelcoSec Intel</text>
+    </g>
+  </g>
+
+  <!-- ─── LAYER 1: Diagnostic Input & Capture Sources ────────────────────── -->
+  <g transform="translate(40, 100)">
+    <rect width="1120" height="130" rx="12" fill="url(#cardGrad)" stroke="#00f0ff" stroke-width="1.5" stroke-opacity="0.6" filter="url(#cardGlow)"/>
+    
+    <text x="24" y="28" class="layer-title">1. Diagnostic Input &amp; Hardware Abstraction Layer</text>
+    <text x="440" y="28" class="layer-sub">// Real-time serial, USB bulk, ADB kernel bridge &amp; multi-format session replay</text>
+
+    <!-- Card 1.1: Qualcomm DIAG -->
+    <g transform="translate(24, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Qualcomm DIAG (HDLC)</text>
+      <text x="14" y="42" class="box-desc">Rooted Android (/dev/diag)</text>
+      <text x="14" y="58" class="box-desc">USB Modem (PySerial / PyUSB)</text>
+    </g>
+
+    <!-- Card 1.2: Samsung Shannon -->
+    <g transform="translate(295, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Samsung Shannon (Exynos)</text>
+      <text x="14" y="42" class="box-desc">Exynos 980..2400 / Google Tensor</text>
+      <text x="14" y="58" class="box-desc">Channel demux &amp; HDLC unescape</text>
+    </g>
+
+    <!-- Card 1.3: MediaTek -->
+    <g transform="translate(565, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">MediaTek (Dimensity / Helio)</text>
+      <text x="14" y="42" class="box-desc">ELT &amp; Catcher protocol sync</text>
+      <text x="14" y="58" class="box-desc">SAP subsystem dispatch (5G/4G/3G)</text>
+    </g>
+
+    <!-- Card 1.4: Session Replay -->
+    <g transform="translate(835, 42)">
+      <rect width="260" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Session Replay Engine</text>
+      <text x="14" y="42" class="box-desc">PCAP / DLF / QMDL2 / GeoJSON</text>
+      <text x="14" y="58" class="box-desc">Timeline scrub, step &amp; 0.5x..10x</text>
+    </g>
+  </g>
+
+  <!-- Flow Arrows L1 -> L2 -->
+  <path d="M 600 230 L 600 256" stroke="#00f0ff" stroke-width="2" marker-end="url(#arrowCyan)"/>
+
+  <!-- ─── LAYER 2: Protocol & Dissection Engine ──────────────────────────── -->
+  <g transform="translate(40, 260)">
+    <rect width="1120" height="130" rx="12" fill="url(#cardGrad)" stroke="#00e676" stroke-width="1.5" stroke-opacity="0.6" filter="url(#cardGlow)"/>
+    
+    <text x="24" y="28" class="layer-title">2. Protocol Dissection &amp; GSMTAP Encapsulation Engine</text>
+    <text x="490" y="28" class="layer-sub">// Layer-3 OTA message parsing, ASN.1 SIB reassembly &amp; 107 Lua dissectors</text>
+
+    <!-- Card 2.1: DeepDissector -->
+    <g transform="translate(24, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">DeepDissector Engine</text>
+      <text x="14" y="42" class="box-desc">5G NAS (5GMM/5GSM) &amp; LTE NAS</text>
+      <text x="14" y="58" class="box-desc">SIM APDU (ISO 7816) &amp; IMS SIP</text>
+    </g>
+
+    <!-- Card 2.2: SIB Reassembler -->
+    <g transform="translate(295, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">SIB Reassembler &amp; Codec</text>
+      <text x="14" y="42" class="box-desc">UMTS SIB segment reassembly</text>
+      <text x="14" y="58" class="box-desc">LTE / 5G NR SIB1/SIB2 decoding</text>
+    </g>
+
+    <!-- Card 2.3: GSMTAP Encapsulation -->
+    <g transform="translate(565, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">GSMTAP v2 Frame Builder</text>
+      <text x="14" y="42" class="box-desc">LinkType 228 / UDP port 4729</text>
+      <text x="14" y="58" class="box-desc">2G/3G/4G/5G NR &amp; CALEA LI</text>
+    </g>
+
+    <!-- Card 2.4: Wireshark Lua Plugins -->
+    <g transform="translate(835, 42)">
+      <rect width="260" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">107 Wireshark Lua Dissectors</text>
+      <text x="14" y="42" class="box-desc">Auto-installer for Linux/Win/Mac</text>
+      <text x="14" y="58" class="box-desc">SS7, Diameter, eSIM, STK, SBI</text>
+    </g>
+  </g>
+
+  <!-- Flow Arrows L2 -> L3 -->
+  <path d="M 600 390 L 600 416" stroke="#00e676" stroke-width="2" marker-end="url(#arrowGreen)"/>
+
+  <!-- ─── LAYER 3: Tactical Intelligence & Security Engine ───────────────── -->
+  <g transform="translate(40, 420)">
+    <rect width="1120" height="130" rx="12" fill="url(#cardGrad)" stroke="#d500f9" stroke-width="1.5" stroke-opacity="0.6" filter="url(#cardGlow)"/>
+    
+    <text x="24" y="28" class="layer-title">3. Tactical Intelligence, Security &amp; Forensic Exploitation</text>
+    <text x="490" y="28" class="layer-sub">// 80 Master Vulnerability Rules, NVRAM Band Locker, EFS Shell &amp; 3GPP Fuzzer</text>
+
+    <!-- Card 3.1: TelcoSec 80 Rules -->
+    <g transform="translate(24, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">TelcoSec Security Auditor</text>
+      <text x="14" y="42" class="box-desc">80 Master Rules (VULN-001..080)</text>
+      <text x="14" y="58" class="box-desc">Null cipher, IMSI Catcher, SIMjacker</text>
+    </g>
+
+    <!-- Card 3.2: NVRAM Manager -->
+    <g transform="translate(295, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Baseband NVRAM &amp; Bands</text>
+      <text x="14" y="42" class="box-desc">64/128-bit bitmask band locker</text>
+      <text x="14" y="58" class="box-desc">Carrier presets (AT&amp;T, VZW, TMO)</text>
+    </g>
+
+    <!-- Card 3.3: Qualcomm EFS Shell -->
+    <g transform="translate(565, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Baseband EFS Shell (18 Cmds)</text>
+      <text x="14" y="42" class="box-desc">ls, cat, get -r, grep, find, tree</text>
+      <text x="14" y="58" class="box-desc">Hex dump, statfs, MD5 integrity</text>
+    </g>
+
+    <!-- Card 3.4: 3GPP Protocol Fuzzer -->
+    <g transform="translate(835, 42)">
+      <rect width="260" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Protocol Fuzzer &amp; Bench</text>
+      <text x="14" y="42" class="box-desc">12+ templates, 6 mutation strats</text>
+      <text x="14" y="58" class="box-desc">&gt;2,000 pkts/s sub-ms benchmark</text>
+    </g>
+  </g>
+
+  <!-- Flow Arrows L3 -> L4 -->
+  <path d="M 600 550 L 600 576" stroke="#d500f9" stroke-width="2" marker-end="url(#arrowPurple)"/>
+
+  <!-- ─── LAYER 4: Presentation & Operations Suite ───────────────────────── -->
+  <g transform="translate(40, 580)">
+    <rect width="1120" height="130" rx="12" fill="url(#cardGrad)" stroke="#ff9100" stroke-width="1.5" stroke-opacity="0.6" filter="url(#cardGlow)"/>
+    
+    <text x="24" y="28" class="layer-title">4. Visual Operations Suite &amp; Live Sinks</text>
+    <text x="350" y="28" class="layer-sub">// Real-time WebSockets, REST APIs, Wireshark Live &amp; 10 Dedicated Web Views</text>
+
+    <!-- Card 4.1: Wireshark Live -->
+    <g transform="translate(24, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">Wireshark Live Stream</text>
+      <text x="14" y="42" class="box-desc">Live pipe / UDP 4729 stream</text>
+      <text x="14" y="58" class="box-desc">PCAP / QMDL2 / DLF export</text>
+    </g>
+
+    <!-- Card 4.2: Web GUI Server -->
+    <g transform="translate(295, 42)">
+      <rect width="255" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">HTTP &amp; WebSocket Server</text>
+      <text x="14" y="42" class="box-desc">Port 5000 / RFC 6455 WebSockets</text>
+      <text x="14" y="58" class="box-desc">REST API (40+ endpoints)</text>
+    </g>
+
+    <!-- Card 4.3: 10 Operational Views -->
+    <g transform="translate(565, 42)">
+      <rect width="530" height="72" rx="8" fill="#0b1220" stroke="#1e2c48" stroke-width="1"/>
+      <text x="14" y="22" class="box-title">10 Dedicated Visual Operations Views (Web Console)</text>
+      <text x="14" y="42" class="box-desc">/live (Signaling) | /security (Radar) | /map (Wardrive) | /efs (Explorer) | /nv (Bands)</text>
+      <text x="14" y="58" class="box-desc">/f3 (QXDM Logs) | /terminal (AT/DIAG) | /device (Dossier) | /fuzzer | /calea (LI)</text>
+    </g>
+  </g>
+</svg>

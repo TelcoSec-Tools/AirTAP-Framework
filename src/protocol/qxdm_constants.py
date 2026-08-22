@@ -1,0 +1,169 @@
+#!/usr/bin/python3
+#-*- encoding: Utf-8 -*-
+
+"""
+    Qualcomm QXDM Professional Protocol Constants:
+    - Subsystem IDs (SSID) for F3 Message Tracing
+    - Asynchronous Event Report IDs
+    - NV (Non-Volatile) Item IDs
+"""
+
+# F3 Message Subsystem IDs (SSID)
+SSID_NAMES = {
+    # Core & OS
+    0: 'CORE',
+    1: 'AMSS',
+    2: 'REX',
+    3: 'TASK',
+    4: 'CLK',
+    5: 'TIMETICK',
+    6: 'SLEEP',
+    7: 'MEM',
+    8: 'ERR',
+    9: 'BIO',
+    10: 'HW',
+    
+    # 2G GSM / GPRS / EDGE
+    100: 'GSM_RR',
+    101: 'GSM_L2',
+    102: 'GSM_L1',
+    103: 'GSM_GL1',
+    104: 'GSM_GPRS_MAC',
+    105: 'GSM_GPRS_RLC',
+    106: 'GSM_GPRS_LLC',
+    107: 'GSM_GPRS_SNDCP',
+
+    # 3G UMTS / WCDMA / HSPA
+    200: 'WCDMA_RRC',
+    201: 'WCDMA_L2',
+    202: 'WCDMA_RLC',
+    203: 'WCDMA_MAC',
+    204: 'WCDMA_L1',
+
+    # 4G LTE
+    300: 'LTE_RRC',
+    301: 'LTE_PDCP_UL',
+    302: 'LTE_PDCP_DL',
+    303: 'LTE_RLC_UL',
+    304: 'LTE_RLC_DL',
+    305: 'LTE_MAC_UL',
+    306: 'LTE_MAC_DL',
+    307: 'LTE_ML1',
+    308: 'LTE_NAS_EMM',
+    309: 'LTE_NAS_ESM',
+
+    # 5G NR (New Radio)
+    400: 'NR5G_RRC',
+    401: 'NR5G_PDCP',
+    402: 'NR5G_RLC',
+    403: 'NR5G_MAC',
+    404: 'NR5G_ML1',
+    405: 'NR5G_SDAP',
+    406: 'NR5G_NAS_5GMM',
+    407: 'NR5G_NAS_5GSM',
+
+    # IMS / VoLTE / VoNR / SIP
+    500: 'IMS',
+    501: 'IMS_SIP',
+    502: 'IMS_REG',
+    503: 'IMS_SDP',
+    504: 'IMS_RTP',
+    505: 'QMI_VOICE',
+
+    # Data & Services
+    600: 'DATA_SERVICES',
+    601: 'QMI',
+    602: 'QMI_NAS',
+    603: 'QMI_DMS',
+    604: 'QMI_WDS',
+    605: 'UIM_SIM',
+    606: 'GPS_GNSS',
+}
+
+# F3 Severity Levels
+MSG_SEV_LOW = 0
+MSG_SEV_MED = 1
+MSG_SEV_HIGH = 2
+MSG_SEV_ERROR = 3
+MSG_SEV_FATAL = 4
+
+MSG_SEV_NAMES = {
+    MSG_SEV_LOW: 'LOW',
+    MSG_SEV_MED: 'MED',
+    MSG_SEV_HIGH: 'HIGH',
+    MSG_SEV_ERROR: 'ERROR',
+    MSG_SEV_FATAL: 'FATAL',
+}
+
+# Qualcomm Asynchronous Event Report IDs
+EVENT_NAMES = {
+    # 2G / 3G Events
+    1: 'EVENT_DROP_CALL',
+    2: 'EVENT_CALL_PROCESSING',
+    3: 'EVENT_POWER_DOWN',
+    10: 'EVENT_GSM_LINK_FAILURE',
+    11: 'EVENT_GSM_HANDOVER_START',
+    12: 'EVENT_GSM_HANDOVER_SUCCESS',
+    20: 'EVENT_WCDMA_RRC_STATE',
+    21: 'EVENT_WCDMA_OUT_OF_SERVICE',
+
+    # 4G LTE Events
+    1000: 'EVENT_LTE_RRC_STATE_CHANGE',
+    1001: 'EVENT_LTE_HANDOVER_START',
+    1002: 'EVENT_LTE_HANDOVER_SUCCESS',
+    1003: 'EVENT_LTE_HANDOVER_FAILURE',
+    1004: 'EVENT_LTE_RADIO_LINK_FAILURE',
+    1005: 'EVENT_LTE_OUT_OF_SERVICE',
+    1006: 'EVENT_LTE_CELL_RESELECTION_START',
+    1007: 'EVENT_LTE_CELL_RESELECTION_SUCCESS',
+    1008: 'EVENT_LTE_NAS_ATTACH_START',
+    1009: 'EVENT_LTE_NAS_ATTACH_SUCCESS',
+    1010: 'EVENT_LTE_NAS_ATTACH_FAILED',
+    1011: 'EVENT_LTE_RACH_START',
+    1012: 'EVENT_LTE_RACH_SUCCESS',
+    1013: 'EVENT_LTE_RACH_FAILURE',
+
+    # 5G NR Events
+    2000: 'EVENT_NR5G_RRC_STATE_CHANGE',
+    2001: 'EVENT_NR5G_HANDOVER_START',
+    2002: 'EVENT_NR5G_HANDOVER_SUCCESS',
+    2003: 'EVENT_NR5G_HANDOVER_FAILURE',
+    2004: 'EVENT_NR5G_RADIO_LINK_FAILURE',
+    2005: 'EVENT_NR5G_RACH_START',
+    2006: 'EVENT_NR5G_RACH_SUCCESS',
+    2007: 'EVENT_NR5G_BEAM_SWITCH',
+    2008: 'EVENT_NR5G_NAS_REGISTRATION_START',
+    2009: 'EVENT_NR5G_NAS_REGISTRATION_SUCCESS',
+    2010: 'EVENT_NR5G_NAS_REGISTRATION_FAILURE',
+
+    # IMS / Call Events
+    3000: 'EVENT_IMS_REGISTRATION_SUCCESS',
+    3001: 'EVENT_IMS_REGISTRATION_FAILURE',
+    3002: 'EVENT_IMS_DEREGISTRATION',
+    3003: 'EVENT_CALL_ORIGINATION',
+    3004: 'EVENT_CALL_CONNECTED',
+    3005: 'EVENT_CALL_ENDED',
+    3006: 'EVENT_EMERGENCY_CALL_START',
+}
+
+# Common NV (Non-Volatile) Item IDs
+NV_ITEM_NAMES = {
+    0: 'NV_ESN_I',
+    454: 'NV_DIR_NUMBER_I',
+    550: 'NV_SEC_CODE_I',
+    553: 'NV_IMSI_MCC_I',
+    554: 'NV_IMSI_11_12_I',
+    555: 'NV_IMSI_ADDR_NUM_I',
+    1877: 'NV_RF_BC_CONFIG_I',
+    1878: 'NV_RF_BC_CONFIG_DIV_I',
+    2061: 'NV_WCDMA_1900_I',
+    2062: 'NV_WCDMA_850_I',
+    2954: 'NV_UMTS_UE_CATEGORY_I',
+    6828: 'NV_LTE_BC_CONFIG_I',
+    6829: 'NV_LTE_BC_CONFIG_DIV_I',
+    70210: 'NV_IMS_ENABLE_I',
+    70211: 'NV_IMS_TEST_MODE_I',
+    71500: 'NV_NR5G_SA_ENABLE_I',
+    71501: 'NV_NR5G_NSA_ENABLE_I',
+    71502: 'NV_NR5G_BAND_PREF_I',
+}

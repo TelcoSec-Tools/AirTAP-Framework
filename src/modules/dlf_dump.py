@@ -4,7 +4,7 @@ from ..modules._enable_log_mixin import EnableLogMixin
 from ..protocol.gsmtap import build_gsmtap_ip
 from ..protocol.log_types import *
 from struct import pack, unpack
-from logging import warn
+from logging import warning
 
 """
     This module registers various diag LOG events, and generated a raw DLF
@@ -18,20 +18,44 @@ class DlfDumper(EnableLogMixin):
         super().__init__()
         
         self.dlf_file = dlf_file
-        
+
         self.diag_input = diag_input
-    
+
+        self.logs_since_flush = 0
+
     def on_log(self, log_type, log_payload, log_header, timestamp = 0):
-        
+
         #print('X', hex(log_type), log_payload, log_header, timestamp)
         if unpack('<H', log_header[:2])[0] != len(log_header + log_payload):
-            warn('Dismissing log type 0x%04x, indicating size %d instead of %d' % (log_type,
+            warning('Dismissing log type 0x%04x, indicating size %d instead of %d', log_type,
                 unpack('<H', log_header[:2])[0],
                 len(log_header + log_payload)
-            ))
-        
+            )
+
         self.dlf_file.write(log_header + log_payload)
-    
+
+        self.flush_periodically()
+
+    """
+        A capture normally ends through Ctrl-C, an unplugged device or a killed
+        process, not a clean return, so nothing can be counted on to run at
+        exit - self.dlf_file is block-buffered and __del__ may never fire.
+        Without this, a capture shorter than one 8 KiB buffer produces an empty
+        file, and a longer one silently loses its tail.
+    """
+
+    FLUSH_EVERY_N_LOGS = 32
+
+    def flush_periodically(self):
+
+        self.logs_since_flush += 1
+
+        if self.logs_since_flush >= self.FLUSH_EVERY_N_LOGS:
+
+            self.logs_since_flush = 0
+
+            self.dlf_file.flush()
+
     def __del__(self):
-        
+
         self.dlf_file.close()

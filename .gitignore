@@ -1,5 +1,5 @@
 # ==============================================================================
-# AirTap Framework — Comprehensive .gitignore
+# AirTAP Framework — Production-Grade .gitignore
 # ==============================================================================
 
 # ------------------------------------------------------------------------------
@@ -14,6 +14,9 @@ __pycache__/
 *.exe
 *.manifest
 *.spec
+*.bin
+*.out
+*.app
 
 # ------------------------------------------------------------------------------
 # 2. Distribution, Packaging & Build Artifacts
@@ -35,9 +38,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+pip-wheel-metadata/
 
 # ------------------------------------------------------------------------------
-# 3. Unit Test, Coverage & Benchmark Reports
+# 3. Unit Test, Coverage, Linter & Type Check Caches
 # ------------------------------------------------------------------------------
 htmlcov/
 .tox/
@@ -52,13 +58,37 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+.benchmarks/
 
 # ------------------------------------------------------------------------------
-# 4. Virtual Environments & Configuration
+# 4. Secrets, Credentials & Local Environment Files
 # ------------------------------------------------------------------------------
 .env
 .env.*
-!.env.example
+.envrc
+*.pem
+*.key
+*.pkcs12
+*.pfx
+*.p12
+id_rsa
+id_ed25519
+id_ecdsa
+id_dsa
+secrets.json
+credentials.json
+auth.json
+tokens.json
+
+# ------------------------------------------------------------------------------
+# 5. Virtual Environments
+# ------------------------------------------------------------------------------
 .venv
 .venv/
 env/
@@ -66,15 +96,21 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+venv-*/
+env-*/
 
 # ------------------------------------------------------------------------------
-# 5. IDE, Editor & OS System Files
+# 6. IDEs, Editors & OS Metadata
 # ------------------------------------------------------------------------------
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sw[a-p]
 *~
+*.bak
+*.orig
+*.rej
 .~lock.*
 .directory
 .DS_Store
@@ -85,21 +121,46 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 [Dd]esktop.ini
+*.sublime-project
+*.sublime-workspace
+.history/
+.project
+.pydevproject
+.settings/
 
 # ------------------------------------------------------------------------------
-# 6. Agent Workspaces, Scratch & System Caches
+# 7. AI Agents, Assistants, Scratch & Session Memory
 # ------------------------------------------------------------------------------
 .worktrees/
 .superpowers/
 .remember/
+.claude/
+.agents/
+.gemini/
+.cursor/
+.windsurf/
+.aider*
+.chat/
+.continue/
 scratch/
 tmp/
 *.tmp
 
 # ------------------------------------------------------------------------------
-# 7. Diagnostic, Radio Captures & Runtime Dumps
+# 8. Web GUI, Node & Frontend Build Caches (if applicable)
 # ------------------------------------------------------------------------------
-# Cellular capture formats
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.parcel-cache/
+.eslintcache/
+
+# ------------------------------------------------------------------------------
+# 9. Cellular captures, Radio Logs & Forensic Runtime Dumps
+# ------------------------------------------------------------------------------
+# Capture & Diagnostic stream formats
 *.pcap
 *.pcapng
 *.cap
@@ -110,20 +171,42 @@ tmp/
 *.json_geo
 *.sdm
 *.elt
+*.isf
+*.blf
+*.btsnoop
+*.snoop
+*.trl
+*.trace
+*.hexdump
 *.log
 
-# Forensic dump outputs & fuzzing artifacts
+# Forensic dump outputs, fuzzing artifacts & live exports
 audit_log*.json
+sec_audit_*.json
 fuzz_*.pcap
 fuzz_*.json
 fuzz.pcap
+benchmark_*.json
+wardrive_*.json
+wardrive_*.kml
+wardrive_*.gpx
 efs_backup/
 mem_dump/
 nv_backup/
 
 # ------------------------------------------------------------------------------
-# 8. Whitelist / Preserved Fixtures & Documentation Samples
+# 10. Whitelist / Explicitly Preserved Files & Directories
 # ------------------------------------------------------------------------------
+# Keep example env configuration
+!.env.example
+
+# Keep bundled cross-platform ADB executables & libraries
+!src/inputs/external/adb/**
+
+# Keep documentation samples and UI screenshots
 !docs/sample_pcaps/*
 !docs/screenshots/*
+
+# Keep test fixtures and GUI static assets
 !tests/fixtures/*
+!src/modules/gui_assets/*

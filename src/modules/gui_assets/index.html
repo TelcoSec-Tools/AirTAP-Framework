@@ -2947,11 +2947,12 @@
                         <div class="form-group">
                             <label class="form-label" for="fuzzer-template-select">3GPP Protocol Signaling Template:</label>
                             <select id="fuzzer-template-select" class="form-select">
-                                <optgroup label="5G NR Standalone (Rel-17)">
+                                <optgroup label="5G NR Standalone & NTN (Rel-17)">
                                     <option value="nr_rrc_reconfig">5G NR RRC Reconfiguration (TS 38.331)</option>
                                     <option value="nr_reg_reject">5G 5GMM Registration Reject (TS 24.501)</option>
                                     <option value="nr_auth_request">5G 5GMM Authentication Request (TS 24.501)</option>
                                     <option value="nr_sib1">5G NR SIB1 Broadcast (TS 38.331)</option>
+                                    <option value="nr_sib19_ntn">5G NTN Satellite SIB19 Orbital Ephemeris (TS 38.331)</option>
                                 </optgroup>
                                 <optgroup label="4G LTE E-UTRA (Rel-16)">
                                     <option value="lte_nas_smc">LTE NAS Security Mode Command (TS 24.301)</option>
@@ -2960,6 +2961,12 @@
                                     <option value="lte_sib2">LTE SIB2 Radio Resource Config (TS 36.331)</option>
                                     <option value="lte_tau_reject">LTE Tracking Area Update (TAU) Reject (TS 24.301)</option>
                                     <option value="lte_nas_auth_reject">LTE NAS Authentication Reject (TS 24.301)</option>
+                                </optgroup>
+                                <optgroup label="Positioning, eCall & C-V2X Telematics">
+                                    <option value="lpp_prov_loc">3GPP LPP Provide Location Info (TS 37.355)</option>
+                                    <option value="lpp_req_loc">3GPP LPP Request Location Info (TS 37.355)</option>
+                                    <option value="ecall_msd_sos">Emergency eCall MSD Crash Incident (EN 15722)</option>
+                                    <option value="cv2x_pc5_sidelink">C-V2X Sidelink Direct PC5 RRC (TS 38.331)</option>
                                 </optgroup>
                                 <optgroup label="IMS & SIM Subsystems">
                                     <option value="ims_sip_invite">IMS VoLTE/VoNR SIP INVITE (TS 24.229)</option>
@@ -2977,6 +2984,10 @@
                                 <option value="truncation">Mid-IE Truncation &amp; Premature Trailer</option>
                                 <option value="ie_injection">Extraneous Malformed IE Injection</option>
                                 <option value="asn1_tag_corrupt">ASN.1 Tag &amp; Class Bit Corruption</option>
+                                <option value="asn1_uper_overflow">ASN.1 UPER Length Overflow &amp; Extension Bits</option>
+                                <option value="asn1_choice_tamper">ASN.1 Extensible CHOICE Discriminant Tamper</option>
+                                <option value="gps_coord_spoof">WGS-84 Coordinate Overflow &amp; Spoofing</option>
+                                <option value="suci_ecies_tamper">5G SUCI ECIES Ephemeral Key Tampering</option>
                             </select>
                         </div>
 

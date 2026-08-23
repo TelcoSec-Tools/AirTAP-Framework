@@ -1472,8 +1472,33 @@ function switchTab(tabId, pushHistory = true) {
         } catch(e) {}
     }
 
-    if (tabId === 'tab-map' && state.geo.map) {
-        setTimeout(() => state.geo.map.invalidateSize(), 150);
+    if (tabId === 'tab-map') {
+        if (!state.geo.map) {
+            initWardriveMap();
+        } else {
+            setTimeout(() => {
+                state.geo.map.invalidateSize();
+                if (isValidLatLng(state.geo.currentLat, state.geo.currentLng)) {
+                    state.geo.map.panTo([state.geo.currentLat, state.geo.currentLng]);
+                }
+            }, 150);
+        }
+        // Fetch real-time discovered base stations and towers from server backend
+        fetch('/api/geo/towers')
+            .then(r => r.json())
+            .then(d => {
+                if (d.status === 'ok' && Array.isArray(d.towers)) {
+                    d.towers.forEach(t => {
+                        if (t.site_id !== undefined && !state.geo.knownTowers[t.site_id] && isValidLatLng(t.lat, t.lng)) {
+                            state.geo.knownTowers[t.site_id] = t;
+                        }
+                    });
+                    const count = Object.keys(state.geo.knownTowers).length;
+                    setText('btn-tower-count', count);
+                    setText('geo-stat-cells', count);
+                    setText('hud-tel-cells', count);
+                }
+            }).catch(() => {});
     }
     if (tabId === 'tab-calea') {
         loadCaleaStats();
@@ -2043,6 +2068,45 @@ function updateRfGauges(s) {
         setText('cell-arfcn', s.arfcn);
     } else if (s.arfcn === null) {
         setText('cell-arfcn', '—');
+    }
+
+    // Real-Time Map Intel Banner Overlay & Telemetry HUD Synchronizer
+    const intelCell = document.getElementById('map-intel-cell');
+    if (intelCell && s.pci !== undefined && s.pci !== null) {
+        const siteId = Math.floor(s.pci / 3);
+        const sec = (s.pci % 3) + 1;
+        intelCell.textContent = `PCI ${s.pci} (Site #${siteId}, Sec ${sec})`;
+    }
+    const intelBand = document.getElementById('map-intel-band');
+    if (intelBand && s.band) {
+        intelBand.textContent = `${s.rat || 'Cellular'} | ${s.band}${s.arfcn ? ` (ARFCN ${s.arfcn})` : ''}`;
+    }
+    const intelTa = document.getElementById('map-intel-ta');
+    if (intelTa) {
+        if (s.timing_advance !== undefined && s.timing_advance !== null) {
+            const taMeters = Math.round(s.timing_advance * 78.12);
+            intelTa.textContent = `TA: ${s.timing_advance} (~${taMeters} m)`;
+        } else if (s.ta !== undefined && s.ta !== null) {
+            const taM = Math.round(s.ta * 78.12);
+            intelTa.textContent = `TA: ${s.ta} (~${taM} m)`;
+        }
+    }
+    const intelCa = document.getElementById('map-intel-ca');
+    if (intelCa) {
+        intelCa.textContent = s.ca_active ? `${s.ca_scc_count || 1}x CA Active` : '1x Carrier (Primary)';
+    }
+
+    // Push real-time RF measurement to Map Heatmap Contour Layer if GPS is locked
+    if (state.geo && isValidLatLng(state.geo.currentLat, state.geo.currentLng) && s.rsrp !== undefined && s.rsrp !== null) {
+        updateGeoTelemetry({
+            lat: state.geo.currentLat,
+            lng: state.geo.currentLng,
+            pci: s.pci,
+            rsrp: s.rsrp,
+            sinr: s.sinr,
+            band: s.band,
+            rat: s.rat || '5G'
+        });
     }
 
     if (s.rat_counts) updateRatBars(s.rat_counts);

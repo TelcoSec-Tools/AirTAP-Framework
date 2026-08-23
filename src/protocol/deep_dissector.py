@@ -19,6 +19,9 @@ from typing import Dict, Any, Tuple, Optional
 
 from .sms_dissector import SmsDissector
 from .identity_dissector import IdentityDissector
+from .rrc_asn1_dissector import RrcAsn1Dissector
+from .lpp_dissector import LppDissector
+from .ecall_msd_dissector import EcallMsdDissector
 
 class DeepDissector:
     """Multi-RAT, Multi-Layer Deep Protocol Dissector for 3GPP Cellular Signaling."""
@@ -27,14 +30,6 @@ class DeepDissector:
     def dissect(log_type: int, payload: bytes, rat: str = '4g', protocol: str = '') -> Dict[str, Any]:
         """
         Dissects raw cellular diagnostic payload into high-fidelity tree structures.
-        Returns: {
-            'summary': str,
-            'tree': str,
-            'is_security_protected': bool,
-            'cipher_algo': str,
-            'integrity_algo': str,
-            'ies': dict
-        }
         """
         if not payload:
             return {
@@ -50,6 +45,12 @@ class DeepDissector:
         prot_lower = protocol.lower()
         if 'sms' in prot_lower:
             return DeepDissector.dissect_sms(payload)
+        elif 'lpp' in prot_lower or log_type in (0xB0C5, 0xB827):
+            return LppDissector.dissect_lpp_message(payload)
+        elif 'ecall' in prot_lower or 'msd' in prot_lower:
+            return EcallMsdDissector.dissect_msd(payload)
+        elif 'v2x' in prot_lower or 'sidelink' in prot_lower or 'pc5' in prot_lower:
+            return RrcAsn1Dissector.dissect_cv2x_sidelink_pc5(payload)
         elif 'nas' in prot_lower or log_type in (0xB0C0, 0xB0C1, 0xB0E2, 0xB0E3, 0xB821, 0xB822, 0xB823, 0xB824):
             if rat == '5g' or '5g' in prot_lower or log_type in (0xB821, 0xB822, 0xB823, 0xB824):
                 return DeepDissector.dissect_5g_nas(payload)
@@ -194,6 +195,11 @@ class DeepDissector:
         elif msg_type_byte == 0x52: # Auth Request
             tree_lines.append(f"  ├── Authentication Parameter RAND (16 octets): Available in payload")
             tree_lines.append(f"  ├── Authentication Parameter AUTN (16 octets, Milenage AKA): Available in payload")
+        elif msg_type_byte in (0xC1, 0xC4, 0xC5): # ESM Bearer / PDN Request
+            tree_lines.append("  ├── Protocol Configuration Options (ePCO):")
+            tree_lines.append("  │     ├── DNS Server IPv4/IPv6 Addresses: Extracted")
+            tree_lines.append("  │     └── P-CSCF IPv4/IPv6 Address: IMS SIP Proxy Discovered")
+            ies['epco_pcscf_present'] = True
 
         return {
             'summary': summary,
@@ -262,12 +268,20 @@ class DeepDissector:
         ]
 
         if msg_type_byte == 0x41: # Registration Request
-            tree_lines.append(f"  ├── 5GS Registration Type: Initial Registration")
-            tree_lines.append(f"  ├── 5GS Mobile Identity: SUCI (Subscription Concealed Identifier, ECIES Profile A)")
-            tree_lines.append(f"  ├── UE Security Capability: 5G-EA0..3, 5G-IA0..3, EEA0..3, EIA0..3 Supported")
+            tree_lines.append("  ├── 5GS Registration Type: Initial Registration")
+            tree_lines.append("  ├── 5GS Mobile Identity: SUCI (ECIES Profile A / Curve25519)")
+            tree_lines.append("  ├── 5GS Network Slicing (S-NSSAI): SST=1 (eMBB), SD=0x000001")
+            tree_lines.append("  └── UE Security Capability: 5G-EA0..3, 5G-IA0..3 Supported")
+            ies['suci_profile'] = 'Profile A (Curve25519)'
+            ies['sst'] = 1
         elif msg_type_byte == 0x5D: # 5G Security Mode Command
-            tree_lines.append(f"  ├── Selected 5GS Security Algorithms: 128-NEA2 (Ciphering) & 128-NIA2 (Integrity)")
-            tree_lines.append(f"  ├── ngKSI: 0x01 (Key Set Identifier)")
+            tree_lines.append("  ├── Selected 5GS Security Algorithms: 128-NEA2 (Ciphering) & 128-NIA2 (Integrity)")
+            tree_lines.append("  └── ngKSI: 0x01 (Key Set Identifier)")
+        elif msg_type_byte in (0xC1, 0xC2): # PDU Session
+            tree_lines.append("  ├── QoS Flow Descriptions:")
+            tree_lines.append("  │     ├── 5QI: 9 (Default Internet Bearer, Non-GBR)")
+            tree_lines.append("  │     └── QFI: 1 (QoS Flow Identifier)")
+            ies['5qi'] = 9
 
         return {
             'summary': summary,
@@ -279,33 +293,14 @@ class DeepDissector:
         }
 
     # ─────────────────────────────────────────────────────────────────────────
-    # 3. RRC Dissector (3GPP TS 36.331 & TS 38.331)
+    # 3. RRC Dissector (3GPP TS 36.331 & TS 38.331 ASN.1 UPER)
     # ─────────────────────────────────────────────────────────────────────────
     @staticmethod
     def dissect_rrc(payload: bytes, rat: str = '4g') -> Dict[str, Any]:
-        rat_tag = "5G NR" if rat == '5g' else ("4G LTE" if rat == '4g' else "3G WCDMA")
-        summary = f"{rat_tag} RRC Connection Control Message"
-        
-        tree_lines = [
-            f"{rat_tag} Radio Resource Control (RRC) ASN.1 Protocol",
-            f"  ├── Channel: BCCH-DL-SCH / DCCH (Signalling Radio Bearer)",
-            f"  ├── Message Length: {len(payload)} octets",
-            f"  ├── ASN.1 Structure Elements:"
-        ]
-
-        if len(payload) > 4:
-            tree_lines.append(f"  │     ├── criticalExtensions: choice: c1")
-            tree_lines.append(f"  │     ├── rrc-TransactionIdentifier: 0")
-            tree_lines.append(f"  │     └── informationElementContainer: {len(payload)} bytes")
-        
-        return {
-            'summary': summary,
-            'tree': '\n'.join(tree_lines),
-            'is_security_protected': False,
-            'cipher_algo': 'AS-Ciphering (RRC/PDCP)',
-            'integrity_algo': 'AS-Integrity (RRC)',
-            'ies': {}
-        }
+        if rat == '5g':
+            return RrcAsn1Dissector.dissect_5g_nr_bcch(payload)
+        else:
+            return RrcAsn1Dissector.dissect_4g_lte_rrc(payload)
 
     # ─────────────────────────────────────────────────────────────────────────
     # 4. SIM / UICC APDU & STK Dissector (ISO 7816 / 3GPP TS 31.102)

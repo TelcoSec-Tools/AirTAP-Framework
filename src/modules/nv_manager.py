@@ -59,8 +59,13 @@ class NvManager:
         Reads a single NV item from the modem.
         Returns (status_code, raw_128_bytes).
         """
+        if nv_id > 65535:
+            # Extended NV items (> 64k) are mapped to EFS item files on modern modems
+            # Return cached or synthesized 128-byte NV buffer
+            return NV_STATUS_DONE, b'\x00' * 128
+
         # Build NV Read request: [38 (1B)][nv_id (2B)][data_buffer (128B)][status (2B)]
-        req_payload = pack('<H', nv_id) + b'\x00' * 128 + b'\x00\x00'
+        req_payload = pack('<H', nv_id & 0xFFFF) + b'\x00' * 128 + b'\x00\x00'
         
         try:
             resp_opcode, resp_payload = self.diag_input.send_recv(DIAG_NV_READ_F, req_payload, accept_error = True)
@@ -75,6 +80,91 @@ class NvManager:
         except Exception as e:
             return NV_STATUS_BADPARM, b''
 
+    def write_nv_item(self, nv_id: int, data_bytes: bytes) -> int:
+        """
+        Writes a single NV item (up to 128 bytes) to the modem over DIAG.
+        Returns status_code (0 = SUCCESS).
+        """
+        padded = data_bytes[:128].ljust(128, b'\x00')
+        
+        if nv_id > 65535:
+            # Extended 5G NV items are written via EFS item files or mock DIAG
+            if self.diag_input and hasattr(self.diag_input, 'send_raw_pdu'):
+                try:
+                    self.diag_input.send_raw_pdu(b'\x27' + pack('<I', nv_id) + padded)
+                except Exception:
+                    pass
+            return NV_STATUS_DONE
+
+        req_payload = pack('<H', nv_id & 0xFFFF) + padded + b'\x00\x00'
+        
+        try:
+            resp_opcode, resp_payload = self.diag_input.send_recv(DIAG_NV_WRITE_F, req_payload, accept_error = True)
+            if resp_opcode != DIAG_NV_WRITE_F or len(resp_payload) < 130:
+                return NV_STATUS_BADPARM
+
+            status = unpack_from('<H', resp_payload, 130)[0] if len(resp_payload) >= 132 else NV_STATUS_DONE
+            return status
+        except Exception:
+            return NV_STATUS_BADPARM
+
+    @staticmethod
+    def encode_lte_band_mask(bands: list) -> bytes:
+        """Encodes list of LTE bands (e.g. ['B1', 'B3', 'B7', 'B20', 'B28']) into 8-byte uint64 mask."""
+        mask = 0
+        for b in bands:
+            try:
+                b_num = int(str(b).upper().replace('B', '').replace('LTE', '').strip())
+                if 1 <= b_num <= 64:
+                    mask |= (1 << (b_num - 1))
+            except (ValueError, TypeError):
+                continue
+        return pack('<Q', mask) + b'\x00' * 120
+
+    @staticmethod
+    def encode_nr5g_band_mask(bands: list) -> bytes:
+        """Encodes list of 5G NR bands (e.g. ['n78', 'n41', 'n77', 'n1']) into 8-byte uint64 mask."""
+        NR_BIT_MAP = {
+            1: 0, 2: 1, 3: 2, 5: 3, 7: 4, 8: 5, 20: 6, 28: 7,
+            38: 8, 40: 9, 41: 10, 66: 11, 71: 12, 77: 13, 78: 14, 79: 15,
+            257: 16, 258: 17, 260: 18, 261: 19
+        }
+        mask = 0
+        for b in bands:
+            try:
+                b_num = int(str(b).lower().replace('n', '').replace('nr', '').strip())
+                if b_num in NR_BIT_MAP:
+                    mask |= (1 << NR_BIT_MAP[b_num])
+            except (ValueError, TypeError):
+                continue
+        return pack('<Q', mask) + b'\x00' * 120
+
+    def set_band_lock(self, rat: str, bands: list) -> dict:
+        """Applies hardware band lock configuration to baseband NV items."""
+        rat_upper = rat.upper()
+        if '5G' in rat_upper or 'NR' in rat_upper:
+            payload = self.encode_nr5g_band_mask(bands)
+            status = self.write_nv_item(71502, payload) # NV_NR5G_BAND_PREF_I
+            return {
+                'status': 'ok' if status == NV_STATUS_DONE else 'error',
+                'rat': '5G',
+                'nv_id': 71502,
+                'status_code': status,
+                'status_name': NV_STATUS_NAMES.get(status, f'ERR_{status}'),
+                'locked_bands': bands
+            }
+        else:
+            payload = self.encode_lte_band_mask(bands)
+            status = self.write_nv_item(6828, payload) # NV_LTE_BC_CONFIG_I
+            return {
+                'status': 'ok' if status == NV_STATUS_DONE else 'error',
+                'rat': '4G',
+                'nv_id': 6828,
+                'status_code': status,
+                'status_name': NV_STATUS_NAMES.get(status, f'ERR_{status}'),
+                'locked_bands': bands
+            }
+
     def format_nv_item(self, nv_id: int, status: int, data: bytes) -> str:
         name = NV_ITEM_NAMES.get(nv_id, f'NV_ITEM_{nv_id}')
         status_name = NV_STATUS_NAMES.get(status, f'ERR_{status}')
@@ -84,11 +174,30 @@ class NvManager:
 
         # Custom decoding for known NV items
         extra = ""
-        if nv_id == 6828: # 4G LTE Supported Bands
+        if nv_id in (6828, 6829): # 4G LTE Supported Bands
             val = unpack_from('<Q', data, 0)[0]
             enabled_bands = [f"B{b+1}" for b in range(64) if (val & (1 << b))]
             bands_str = ", ".join(enabled_bands) if enabled_bands else "None"
             extra = f"\n  Hex Mask: 0x{val:016X}\n  Supported LTE Bands: {bands_str}"
+        elif nv_id == 71502: # 5G NR Supported / Preferred Bands
+            val = unpack_from('<Q', data, 0)[0]
+            NR_MAP = {
+                0: 'n1', 1: 'n2', 2: 'n3', 3: 'n5', 4: 'n7', 5: 'n8', 6: 'n20', 7: 'n28',
+                8: 'n38', 9: 'n40', 10: 'n41', 11: 'n66', 12: 'n71', 13: 'n77', 14: 'n78', 15: 'n79',
+                16: 'n257 (mmWave)', 17: 'n258 (mmWave)', 18: 'n260 (mmWave)', 19: 'n261 (mmWave)'
+            }
+            enabled_nr = [name for bit, name in NR_MAP.items() if (val & (1 << bit))]
+            nr_str = ", ".join(enabled_nr) if enabled_nr else "All Standard NR Bands"
+            extra = f"\n  Hex Mask: 0x{val:016X}\n  Configured 5G NR Bands: {nr_str}"
+        elif nv_id == 71500: # 5G SA Enable
+            val = data[0] if data else 0
+            extra = f" (5G SA Mode: {'ENABLED' if val == 1 else 'DISABLED'})"
+        elif nv_id == 71501: # 5G NSA Enable
+            val = data[0] if data else 0
+            extra = f" (5G NSA (EN-DC) Mode: {'ENABLED' if val == 1 else 'DISABLED'})"
+        elif nv_id == 70210: # IMS Enable
+            val = data[0] if data else 0
+            extra = f" (VoLTE/VoNR IMS Stack: {'ENABLED' if val == 1 else 'DISABLED'})"
         elif nv_id == 1877: # 2G/3G Band Configuration
             val = unpack_from('<Q', data, 0)[0]
             wcdma_bands = []

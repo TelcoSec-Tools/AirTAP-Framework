@@ -89,6 +89,36 @@ SIGNALING_TEMPLATES = {
         "rat": "SIM",
         "raw_hex": "008800812210112233445566778899aabbccddeeff001000112233445566778899aabbccddeeff",
         "description": "USIM AUTHENTICATE APDU command carrying 3G/4G/5G Milenage RAND & AUTN vectors."
+    },
+    "nr_sib19_ntn": {
+        "name": "5G Satellite NTN SIB19 Ephemeris (3GPP TS 38.331 Rel-17)",
+        "rat": "5G",
+        "raw_hex": "004081020408102030405060708090a0b0c0d0e0f0",
+        "description": "5G Satellite Non-Terrestrial Network SIB19 orbital trajectory and Doppler compensation."
+    },
+    "lpp_prov_loc": {
+        "name": "3GPP LPP ProvideLocationInformation (3GPP TS 37.355)",
+        "rat": "5G",
+        "raw_hex": "0c804000112233445566778899aabbccddee",
+        "description": "LPP Location Report containing GNSS and OTDOA/PRS cellular signal measurements."
+    },
+    "lpp_req_loc": {
+        "name": "3GPP LPP RequestLocationInformation (3GPP TS 37.355)",
+        "rat": "4G",
+        "raw_hex": "0c002000aabbccdd",
+        "description": "LPP Active Location Probe query requesting UE coordinate fix."
+    },
+    "ecall_msd_sos": {
+        "name": "eCall Emergency Minimum Set of Data (EN 15722 ASN.1)",
+        "rat": "IMS",
+        "raw_hex": "0101405646314142434445463132333435363738081a4b00f81a4b00",
+        "description": "Emergency eCall MSD payload containing VIN, EV battery propulsion, and crash geolocation."
+    },
+    "cv2x_pc5_sidelink": {
+        "name": "C-V2X Sidelink Direct RRC PDU (3GPP TS 38.331 PC5)",
+        "rat": "5G",
+        "raw_hex": "1234567890abcdef1122334455667788",
+        "description": "Cellular Vehicle-to-Everything PC5 Direct Sidelink cooperative safety PDU."
     }
 }
 
@@ -151,6 +181,37 @@ class ProtocolFuzzerEngine:
             if len(mutated_bytes) > 0:
                 mutated_bytes[0] = random.choice([0x1F, 0x3F, 0xFF, 0x80])
             desc = "Corrupted ASN.1 BER/PER class identifier and constructed tag bits."
+            anomaly_detected = True
+
+        elif strategy == "asn1_uper_overflow":
+            if len(mutated_bytes) >= 3:
+                mutated_bytes[0] = mutated_bytes[0] | 0x80 # Set extension bit
+                mutated_bytes[1] = 0xFF # Extreme length determinant chunk
+                mutated_bytes[2] = 0xFF
+            desc = "Injected ASN.1 UPER oversized length determinant and extension overflow bits."
+            anomaly_detected = True
+
+        elif strategy == "asn1_choice_tamper":
+            if len(mutated_bytes) >= 1:
+                mutated_bytes[0] = (mutated_bytes[0] & 0x0F) | 0x70 # Out-of-bounds choice index
+            desc = "Injected out-of-range ASN.1 CHOICE discriminant index."
+            anomaly_detected = True
+
+        elif strategy == "gps_coord_spoof":
+            # If payload has coordinates (e.g. eCall MSD or LPP), inject extreme coordinates (0x7FFFFFFF)
+            if len(mutated_bytes) >= 28:
+                mutated_bytes[20:28] = struct.pack('>ii', 0x7FFFFFFF, -0x7FFFFFFF)
+                desc = "Injected out-of-bounds GPS coordinates (overflow WGS-84 coordinate limit)."
+            else:
+                mutated_bytes.extend(struct.pack('>ii', 0x7FFFFFFF, -0x7FFFFFFF))
+                desc = "Appended spoofed out-of-bounds GPS coordinate telemetry."
+            anomaly_detected = True
+
+        elif strategy == "suci_ecies_tamper":
+            if len(mutated_bytes) >= 10:
+                for idx in range(min(10, len(mutated_bytes))):
+                    mutated_bytes[idx] = random.choice([0x00, 0xFF, 0xAA])
+            desc = "Corrupted ECIES Curve25519/secp256r1 Ephemeral Public Key points."
             anomaly_detected = True
 
         # Real hardware / stack transmission evaluation

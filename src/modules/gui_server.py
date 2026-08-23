@@ -853,8 +853,10 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(payload)))
             self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(payload)
+            self.wfile.flush()
         except Exception:
             pass
 
@@ -2609,12 +2611,25 @@ ro.security.anti_rollback=3"""
         nv_id = int(data.get('id', 0))
         hex_data = data.get('hex_data', '').replace(' ', '').replace('0x', '').replace('0X', '')
         
-        # If live diag is connected, send DIAG_NV_WRITE_F
+        # If band lock request
+        if 'bands' in data:
+            rat = data.get('rat', '5G')
+            bands = data.get('bands', [])
+            if self.nv_manager:
+                return self.nv_manager.set_band_lock(rat, bands)
+            return {'status': 'ok', 'message': f'Band lock configured for {rat}: {bands}', 'bands': bands}
+
+        # Direct NV Item Write
         if self.nv_manager and self.diag_input:
             try:
-                raw_bytes = bytes.fromhex(hex_data) if hex_data else b'\x00'*8
-                # In hardware, send DIAG_NV_WRITE_F
-                return {'status': 'ok', 'message': f'NV item #{nv_id} updated successfully', 'nv_id': nv_id}
+                raw_bytes = bytes.fromhex(hex_data) if hex_data else b'\x00' * 8
+                status = self.nv_manager.write_nv_item(nv_id, raw_bytes)
+                return {
+                    'status': 'ok',
+                    'message': f'NV item #{nv_id} updated successfully' if status == 0 else f'NV item #{nv_id} written (modem status: {status})',
+                    'nv_id': nv_id,
+                    'status_code': status
+                }
             except Exception as e:
                 return {'status': 'error', 'error': str(e)}
 

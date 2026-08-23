@@ -1058,6 +1058,19 @@ function initCalea() {
     // Send X1 Provisioning Command
     document.getElementById('btn-send-x1-request')?.addEventListener('click', sendX1ProvisioningRequest);
 
+    // Reset X1 Provisioning Form
+    document.getElementById('btn-reset-x1-form')?.addEventListener('click', () => {
+        const idInput = document.getElementById('x1-target-identity');
+        const hostInput = document.getElementById('x1-delivery-host');
+        const portInput = document.getElementById('x1-delivery-port');
+        const respBox = document.getElementById('x1-response-box');
+        if (idInput) idInput.value = '';
+        if (hostInput) hostInput.value = '127.0.0.1';
+        if (portInput) portInput.value = '5001';
+        if (respBox) respBox.textContent = '// X1 Provisioning form reset to default';
+        showToast('X1 Provisioning form reset', 'info');
+    });
+
     // Copy JSON Inspector Data
     document.getElementById('btn-copy-calea-inspect')?.addEventListener('click', () => {
         const selected = state.calea.sessions.find(s => s.cin === state.calea.selectedCin) || state.calea.sessions[0];
@@ -1508,6 +1521,25 @@ function switchTab(tabId, pushHistory = true) {
         renderIdentitiesTable();
         renderSmsStream();
         renderOtaTable();
+    }
+    if (tabId === 'tab-nv') {
+        loadNvCatalog();
+    }
+    if (tabId === 'tab-efs') {
+        if (!state.efs.loaded) {
+            loadEfsPath(getEfsPath() || '/');
+            loadEfsStatfs();
+            state.efs.loaded = true;
+        }
+    }
+    if (tabId === 'tab-f3') {
+        rebuildF3Terminal();
+    }
+    if (tabId === 'tab-device') {
+        fetchDeviceDossier();
+    }
+    if (tabId === 'tab-fuzzer') {
+        updateFuzzerHud(state.fuzzer.total || 0, state.fuzzer.anomalies || 0);
     }
 }
 
@@ -4597,6 +4629,21 @@ function initEfs() {
         }
     });
 
+    // Partition Tree Collapse / Expand
+    document.getElementById('efs-tree-collapse-all')?.addEventListener('click', () => {
+        const nodes = document.querySelectorAll('#efs-tree-content .tree-node');
+        const isCollapsed = state.efs.treeCollapsed || false;
+        state.efs.treeCollapsed = !isCollapsed;
+        nodes.forEach(node => {
+            if (node.dataset.path !== '/') {
+                node.style.display = state.efs.treeCollapsed ? 'none' : 'flex';
+            }
+        });
+        const btn = document.getElementById('efs-tree-collapse-all');
+        if (btn) btn.textContent = state.efs.treeCollapsed ? '▼' : '▲';
+        showToast(state.efs.treeCollapsed ? 'Collapsed partition tree' : 'Expanded partition tree', 'info', 1200);
+    });
+
     // Lazy load on first tab open
     document.querySelector('[data-tab="tab-efs"]')?.addEventListener('click', function handler() {
         loadEfsPath('/');
@@ -5281,6 +5328,12 @@ function initNvCalculator() {
             navigator.clipboard.writeText(val).then(() => showToast('Copied LTE band mask hex', 'success'));
         }
     });
+    document.getElementById('btn-copy-lte-ext-mask')?.addEventListener('click', () => {
+        const val = document.getElementById('calc-lte-ext-mask')?.value;
+        if (val) {
+            navigator.clipboard.writeText(val).then(() => showToast('Copied LTE Ext band mask hex', 'success'));
+        }
+    });
     document.getElementById('btn-copy-nr-mask')?.addEventListener('click', () => {
         const val = document.getElementById('calc-nr-mask')?.value;
         if (val) {
@@ -5318,16 +5371,27 @@ function initNvCalculator() {
             lteExt: lteExtVal
         });
 
-        fetch('/api/nv/write', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: 6828, hex_data: lteVal })
-        })
-        .then(r => r.json())
-        .then(res => {
-            showToast('NV 6828 (LTE Bands) and NV 71502 (5G NR) written to baseband', 'success');
-        })
-        .catch(() => showToast('Failed to write band mask to baseband', 'error'));
+        const writes = [];
+        if (lteVal) {
+            writes.push(fetch('/api/nv/write', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: 6828, hex_data: lteVal })
+            }).then(r => r.json()));
+        }
+        if (nrVal) {
+            writes.push(fetch('/api/nv/write', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: 71502, hex_data: nrVal })
+            }).then(r => r.json()));
+        }
+
+        Promise.all(writes)
+            .then(() => {
+                showToast('NV 6828 (LTE Bands) and NV 71502 (5G NR) written to baseband', 'success');
+            })
+            .catch(() => showToast('Failed to write band mask to baseband', 'error'));
     });
 
     document.getElementById('btn-nv-rollback')?.addEventListener('click', () => {
@@ -5691,16 +5755,35 @@ function initFilters() {
         });
     });
 
-    // Freeze Stream Toggle
-    const freezeBtn = document.getElementById('btn-toggle-freeze');
-    freezeBtn?.addEventListener('click', () => {
+    // Freeze & Live Stream Capture Toggles
+    function toggleCaptureStream() {
         state.isFrozen = !state.isFrozen;
-        freezeBtn.classList.toggle('active', state.isFrozen);
-        setText('freeze-icon', state.isFrozen ? '▶' : '⏸');
-        setText('freeze-text', state.isFrozen ? 'Stream Paused' : 'Live Stream');
+        const freezeBtn = document.getElementById('btn-toggle-freeze');
+        const headerCaptureBtn = document.getElementById('btn-toggle-capture');
+        const headerDot = document.getElementById('record-dot');
+        const headerText = document.getElementById('capture-btn-text');
+
+        if (freezeBtn) {
+            freezeBtn.classList.toggle('active', state.isFrozen);
+            setText('freeze-icon', state.isFrozen ? '▶' : '⏸');
+            setText('freeze-text', state.isFrozen ? 'Stream Paused' : 'Live Stream');
+        }
+        if (headerCaptureBtn) {
+            headerCaptureBtn.classList.toggle('active', state.isFrozen);
+        }
+        if (headerDot) {
+            headerDot.classList.toggle('paused', state.isFrozen);
+        }
+        if (headerText) {
+            headerText.textContent = state.isFrozen ? 'Capture Paused' : 'Live Capture';
+        }
+
         if (!state.isFrozen) rebuildPacketTable();
-        showToast(state.isFrozen ? 'Packet rendering paused for inspection' : 'Live packet streaming resumed', 'info');
-    });
+        showToast(state.isFrozen ? 'Live packet stream paused for inspection' : 'Live packet stream resumed', 'info');
+    }
+
+    document.getElementById('btn-toggle-freeze')?.addEventListener('click', toggleCaptureStream);
+    document.getElementById('btn-toggle-capture')?.addEventListener('click', toggleCaptureStream);
 
     // Audio Threat Alert Toggle
     document.getElementById('btn-toggle-audio')?.addEventListener('click', toggleAudioAlerts);
@@ -6760,11 +6843,12 @@ function initFuzzer() {
         const template = document.getElementById('fuzzer-template-select')?.value || 'nr_rrc_reconfig';
         const strategy = document.getElementById('fuzzer-strategy-select')?.value || 'byte_boundary';
         const intensity = parseInt(intensRange?.value || '2', 10);
+        const channel = document.getElementById('fuzzer-channel-select')?.value || 'diag';
 
         fetch('/api/fuzzer/generate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template, strategy, intensity })
+            body: JSON.stringify({ template, strategy, intensity, channel })
         })
         .then(r => r.json())
         .then(d => {
@@ -6790,6 +6874,7 @@ function initFuzzer() {
         const strategy = document.getElementById('fuzzer-strategy-select')?.value || 'byte_boundary';
         const intensity = parseInt(intensRange?.value || '2', 10);
         const rate = parseInt(rateRange?.value || '5', 10);
+        const channel = document.getElementById('fuzzer-channel-select')?.value || 'diag';
 
         const startBtn = document.getElementById('btn-fuzzer-start-campaign');
         const stopBtn = document.getElementById('btn-fuzzer-stop-campaign');
@@ -6797,14 +6882,14 @@ function initFuzzer() {
         if (stopBtn) stopBtn.style.display = 'inline-block';
         setText('fuzz-kpi-state', `ACTIVE (${rate} vec/s)`);
 
-        showToast(`Fuzzing campaign active at ${rate} vec/s`, 'info');
+        showToast(`Fuzzing campaign active at ${rate} vec/s via ${channel.toUpperCase()}`, 'info');
 
         const runBatch = () => {
             const batchSize = Math.max(1, Math.min(10, rate));
             fetch('/api/fuzzer/campaign/start', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ template, strategy, intensity, count: batchSize })
+                body: JSON.stringify({ template, strategy, intensity, count: batchSize, channel })
             })
             .then(r => r.json())
             .then(d => {

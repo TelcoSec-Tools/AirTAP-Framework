@@ -9,7 +9,7 @@
 
 **AirTap** is a modern, modular cellular radio diagnostics, packet capture, and security auditing framework. Communicating directly with Qualcomm-based baseband modems via the diagnostic (DIAG) protocol, AirTap decodes and encapsulates raw **2G, 3G, 4G, and 5G NR** radio signaling frames in real time into standard **GSMTAP v2 PCAP** streams and **live Wireshark** sessions.
 
-AirTap also provides an **embedded baseband security auditor** with 80 telecom threat rules, an interactive **EFS (Embedded File System) shell**, **NV item manager**, **QXDM F3 debug message / event streamer**, and real-time **RF telemetry**.
+AirTap also provides an **embedded baseband security auditor** with 88 master telecom threat rules, a pure-Python **3GPP ASN.1 UPER/PER engine**, **Subscriber Identity & Silent SMS dissectors**, an interactive **EFS (Embedded File System) shell**, **Baseband NVRAM Band Locker Studio**, **QXDM F3 debug message / event streamer**, and real-time **Geospatial RF wardrive telemetry**.
 
 ---
 
@@ -29,13 +29,14 @@ AirTap also provides an **embedded baseband security auditor** with 80 telecom t
 - [Quick Start](#quick-start)
 - [Feature Showcase](#feature-showcase)
   - [1. Visual Operations Suite (Web GUI)](#1-visual-operations-suite-web-gui)
-  - [2. Live Wireshark & PCAP Capture](#2-live-wireshark--pcap-capture)
-  - [3. Real-Time Radio Security Auditor](#3-real-time-radio-security-auditor)
-  - [4. Interactive EFS Filesystem Shell](#4-interactive-efs-filesystem-shell)
-  - [5. SIB Decoding & NAS Deciphering](#5-sib-decoding--nas-deciphering)
-  - [6. IMS / VoLTE / VoNR SIP Dissection](#6-ims--volte--vonr-sip-dissection)
-  - [7. QXDM F3 Tracing, Events & DMC Mask Loader](#7-qxdm-f3-tracing-events--dmc-mask-loader)
-  - [8. Cellular RF Signal Telemetry & Band Locker](#8-cellular-rf-signal-telemetry--band-locker)
+  - [2. 3GPP ASN.1 UPER / PER / BER Dissection Engine](#2-3gpp-asn1-uper--per--ber-dissection-engine)
+  - [3. Subscriber Identity & Silent SMS Protocol Suite](#3-subscriber-identity--silent-sms-protocol-suite)
+  - [4. Real-Time Radio Security Auditor (88 Master Rules)](#4-real-time-radio-security-auditor-88-master-rules)
+  - [5. Geospatial Cellular Wardrive & RF Heatmap](#5-geospatial-cellular-wardrive--rf-heatmap)
+  - [6. Baseband NVRAM Studio & Hardware Band Locker](#6-baseband-nvram-studio--hardware-band-locker)
+  - [7. Interactive EFS Filesystem Shell](#7-interactive-efs-filesystem-shell)
+  - [8. APN & 5G S-NSSAI Security Testing Suite](#8-apn--5g-s-nssai-security-testing-suite)
+  - [9. Wireshark Telecom Dissector Suite & C-V2X Scanner](#9-wireshark-telecom-dissector-suite--c-v2x-scanner)
 - [TelcoSec Academy (Training & Labs)](#telcosec-academy--hands-on-telecom-security-training)
 - [Command-Line Reference](#command-line-reference)
 - [Troubleshooting](#troubleshooting)
@@ -48,15 +49,16 @@ AirTap also provides an **embedded baseband security auditor** with 80 telecom t
 ## Key Capabilities
 
 - **Real-Time 2G / 3G / 4G / 5G NR Capture**: Streams raw over-the-air radio signaling (RRC, NAS, MAC, RLC, PDCP, SIBs, SDAP) into GSMTAP v2 frames for Wireshark.
-- **Embedded Security Auditor (80 Threat Rules)**: Automated detection of IMSI catchers, null ciphering (`EEA0`/`NEA0`), null integrity (`EIA0`/`NIA0`), Silent SMS (Type 0), SIMjacker, and ETSI TS 102 232 Lawful Interception taps.
-- **AirTap Visual Operations Suite**: 10 dedicated operational views (Live Signaling, Threat Radar, Hardware Dossier, Wardrive Map, EFS Explorer, NVRAM Band Locker, QXDM F3 Console, AT Terminal, Protocol Fuzzer, and CALEA LI).
+- **Embedded Security Auditor (88 Master Rules)**: Automated detection of IMSI catchers, null ciphering (`EEA0`/`NEA0`), null integrity (`EIA0`/`NIA0`), Silent SMS (Type 0), SIMjacker, and ETSI TS 102 232 Lawful Interception taps.
+- **Pure-Python 3GPP ASN.1 UPER / PER Engine**: Native bit-stream decoder for 5G NR SIB1..SIB19 (NTN Satellite), 4G RRC, C-V2X Sidelink Direct PC5, LPP Positioning (TS 37.355), and European eCall MSD (EN 15722).
+- **Subscriber Identity & Silent SMS Suite**: Real-time extraction of IMSI, TMSI, 4G/5G GUTI, SUCI, Type 0 Silent SMS, Flash Class 0, and SIM OTA commands.
+- **Geospatial Wardrive & Tactical Map**: Live baseband RSRP heatmap contours, multi-sector tower triangulation, Timing Advance (TA) perimeter rings, and CALEA surveillance vectors.
+- **Baseband NVRAM Studio & Band Locker**: Direct modem NV writing (`DIAG_NV_WRITE_F`), 5G NR band preference masks (n1..n261 mmWave), and SA/NSA mode control.
+- **AirTap Visual Operations Suite**: Dedicated operational views (Live Signaling, Threat Radar, Identities, SMS, OTA, Wardrive Map, NV Studio, EFS Explorer, AT Terminal, Protocol Fuzzer, and CALEA LI).
 - **107+ Wireshark Lua Dissectors**: Built-in dissector suite covering 5G NR, LTE, SS7, Diameter, eSIM RSP, STK Proactive, and carrier interfaces.
 - **Multi-Vendor Diagnostic Support**: Qualcomm DIAG, Samsung Shannon (Exynos/Tensor), and MediaTek (Dimensity/Helio) trace formats.
 - **Interactive Session Replayer**: High-precision scrubbing, stepping, and 0.5x..10x playback across PCAP, DLF, QMDL2, and GeoJSON streams.
-- **IMS / VoLTE / VoNR SIP Extraction**: Dissects VoLTE/VoNR SIP signaling (`0x156E`, `0x156F`, `0x1570`, `0xB0E0`, `0xB832`) into native Wireshark UDP/SIP port 5060 packets.
-- **Interactive Modem EFS Shell**: Explore, read, write, search (`find`), `grep`, and recursively download (`get -r`) the baseband internal filesystem.
-- **Non-Volatile (NV) RAM Manager**: Read, dump, and analyze modem NV items including RF band lock configurations.
-- **Cross-Platform Support**: Works seamlessly on Linux, macOS, Windows, and WSL2.
+- **Cross-Platform Support**: Works seamlessly on Linux, macOS, Windows, and WSL2 with self-healing ADB watchdog auto-reconnect.
 
 ---
 
@@ -239,7 +241,23 @@ AirTap includes a built-in **Visual Operations Suite** (`airtap --gui`) powered 
 |:---:|:---:|
 | <img src="docs/screenshots/gui_calea_li.png" width="100%" alt="AirTap CALEA Lawful Interception"> | <img src="docs/screenshots/gui_protocol_fuzzer.png" width="100%" alt="AirTap Protocol Fuzzer"> |
 
-### 2. Real-Time Radio Security Auditor
+### 2. 3GPP ASN.1 UPER / PER / BER Dissection Engine
+AirTap incorporates a pure-Python **ASN.1 bit-stream engine** (`src/protocol/asn1_uper.py`) supporting unaligned packed encoding rules (UPER), packed encoding rules (PER), and basic encoding rules (BER) with zero native compilation dependencies:
+
+- 🛰️ **5G NR SIB1..SIB19 (TS 38.331 Rel-15..17)**: Dissects cell selection thresholds (`q-RxLevMin`, `q-QualMin`), neighbor carrier frequencies, and **SIB19 (Satellite 5G Non-Terrestrial Networks)** orbital ephemeris & Doppler compensation vectors.
+- 📡 **4G LTE RRC & Dedicated Control**: Full parsing of SIB1..SIB21, `RRCConnectionReconfiguration`, and Measurement Configurations.
+- 🚗 **C-V2X Sidelink Direct RRC (PC5)**: Real-time decoding of direct vehicle-to-vehicle telematics, `sl-BWP-Config`, and autonomous resource allocations.
+- 📍 **3GPP Positioning Protocol (LPP - TS 37.355)**: Decodes `ProvideAssistanceData`, `RequestLocationInformation`, and `ProvideLocationInformation` across A-GNSS, RTK, OTDOA, and PRS cellular timing measurements.
+- 🚑 **Emergency eCall Minimum Set of Data (MSD - EN 15722 / ISO 24978)**: Extracts VIN (17-char ASCII), vehicle propulsion type (EV Battery, Hydrogen Fuel Cell, Gasoline, Diesel), crash sensor trigger vs. manual SOS, and WGS-84 coordinates.
+
+### 3. Subscriber Identity & Silent SMS Protocol Suite
+Deep forensic decoders for over-the-air subscriber identities and stealth signaling:
+
+- 👤 **Subscriber Identity Extraction**: Decodes cleartext IMSI, IMEI, IMEISV, 2G/3G TMSI, P-TMSI, M-TMSI, 4G GUTI, 5G-GUTI, 5G-S-TMSI, and 5G ECIES SUCI (Profile A/B Ephemeral Public Keys) alongside USIM APDU `EF_IMSI` / `EF_MSISDN`.
+- 📩 **Silent SMS & OTA Commands**: Detects and parses Type 0 Silent SMS (`PID=0x40`), Flash Class 0 immediate display (`DCS=0x10`), 7-bit GSM, UCS-2, and SIM OTA commands (`PID=0x7F` / TAR payload).
+- 🌍 **Global PLMN Intelligence**: Built-in international carrier resolution dictionary (`GLOBAL_PLMN_MAP`) resolving MCC/MNC codes to carrier names and countries.
+
+### 4. Real-Time Radio Security Auditor (88 Master Rules)
 The built-in telecom vulnerability engine analyzes live signaling against **88 master security detection rules** (cataloged under `TELCOSEC-VULN-001` through `VULN-088`):
 
 - **False Base Station / IMSI Catcher**: Detection of unencrypted OTA IMSI Identity Requests (`VULN-001`).
@@ -254,7 +272,31 @@ The built-in telecom vulnerability engine analyzes live signaling against **88 m
 airtap -a --sec-audit --audit-log report.json
 ```
 
-### 3. Interactive EFS Filesystem Shell
+### 5. Geospatial Cellular Wardrive & RF Heatmap
+The interactive geospatial suite (`#tab-map`) visualizes cellular radio topography in real time:
+
+- 🗺️ **Live RSRP Coverage Heatmap**: Dynamic color-coded signal quality contours (> -85 dBm Excellent, -85..-95 Good, -95..-105 Fair, < -105 Poor).
+- 🗼 **Multi-Sector Cell Tower Triangulation**: Computes base station locations and draws directional radiation azimuth wedges (0°, 120°, 240° with 30° offsets) using the Log-Distance Path Loss Model.
+- ⭕ **Timing Advance (TA) Physical Distance Rings**: 3GPP TS 36.213 / 38.213 distance perimeter circles (`TA * 78.12m`) around serving cell towers.
+- ⚠️ **Geolocated Threat Pins & Surveillance Vectors**: Places red pulsing danger zones when rogue base stations or lawful interception vectors are detected.
+- 💾 **Multi-Format Geospatial Export**: Export drive-tests to Google Earth 3D KML (`/api/geo/export?format=kml`), GeoJSON Features (`format=geojson`), and WiGLE / OpenCellID CSV (`format=wigle`).
+
+### 6. Baseband NVRAM Studio & Hardware Band Locker
+Read, modify, and analyze Qualcomm Non-Volatile (NV) RAM memory items directly over DIAG:
+
+- 🔒 **Hardware 5G NR & LTE Band Lock**: Write band preference masks targeting `NV_NR5G_BAND_PREF_I` (NV #71502) and `NV_LTE_BC_CONFIG_I` (NV #6828) across n1..n261 mmWave and B1..B64.
+- ⚡ **5G SA / NSA Mode Control**: Toggle 5G Standalone (`NV_NR5G_SA_ENABLE_I` #71500) and Non-Standalone EN-DC (`NV_NR5G_NSA_ENABLE_I` #71501).
+- 📞 **VoLTE / VoNR IMS Stack Config**: Enable or audit IMS registration profiles (`NV_IMS_ENABLE_I` #70210).
+
+```bash
+# Read specific NV item:
+airtap -a --nv-read 6828
+
+# Dump common modem NV items:
+airtap -a --nv-dump ./nv_backup
+```
+
+### 7. Interactive EFS Filesystem Shell
 Explore and manipulate Qualcomm modem NV items and configuration files stored in the baseband EFS2 filesystem:
 
 ```bash
@@ -271,7 +313,7 @@ Available shell commands:
 - `statfs`: Show total and available EFS filesystem blocks.
 - `tree [path]`: Visual hierarchical tree of directory structure.
 
-### 4. APN & 5G Data Network Name (DNN) Security Testing Suite
+### 8. APN & 5G S-NSSAI Security Testing Suite
 Audit mobile APN configurations and 5G network slicing against 3GPP TS 23.003, TS 23.401, TS 23.501, and GSMA PRD IR.88 / FS.31 specifications:
 
 - 🔒 **APN Restriction Enforcement**: Audits 3GPP APN Restriction levels (0-4) to prevent cross-bearer isolation leakage on IMS, SOS, and enterprise networks.
@@ -288,7 +330,7 @@ airtap --apn-audit "ims.mnc020.mcc310.gprs" --apn-restr 4
 airtap --apn-audit "enterprise.data" --apn-pdp "IPv4" --apn-proxy "192.168.1.1:8080"
 ```
 
-### 5. Wireshark Telecom Dissector Suite & C-V2X Scanner
+### 9. Wireshark Telecom Dissector Suite & C-V2X Scanner
 AirTap is fully integrated with the open-source **[TelcoSec Wireshark Dissectors](https://github.com/TelcoSec-Tools/TelcoSec_Wireshark_Dissectors)** ecosystem, featuring 70+ specialized Lua protocol analyzers:
 
 - 🚗 **C-V2X & ProSe Sidelink (PC5) Scanner**: Real-time dissection of V2X safety messages (CAM, DENM, BSM, SPAT), IEEE 1609.2 security certificates, and Ghost Vehicle spoofing detection.

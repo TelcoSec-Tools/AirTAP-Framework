@@ -14,6 +14,8 @@ import statistics
 import threading
 from logging import info, error, warning
 
+from ..protocol.deep_dissector import DeepDissector
+
 
 class BenchmarkEngine:
     """
@@ -74,18 +76,30 @@ class BenchmarkEngine:
             ]
 
             processed_count = 0
+            dissect_errors = 0
             for i in range(packet_count):
-                pkt = sample_packets[i % len(sample_packets)].copy()
+                sample = sample_packets[i % len(sample_packets)]
+                pkt = sample.copy()
                 pkt['id'] = i + 1
                 pkt['timestamp'] = time.time()
 
                 t0 = time.perf_counter()
-                
+
+                # Actually run the synthetic payload through the real
+                # dissection pipeline, not just a dict append - this is what
+                # makes the measured latency genuinely reflect dissection
+                # cost rather than just list-append overhead.
+                try:
+                    raw_bytes = bytes.fromhex(sample['raw'])
+                    DeepDissector.dissect(0, raw_bytes, rat=sample['rat'], protocol=sample['protocol'])
+                except Exception:
+                    dissect_errors += 1
+
                 # Ingest into server packet history & audit engine
                 if self.server_instance:
                     if hasattr(self.server_instance, 'packet_history'):
                         self.server_instance.packet_history.append(pkt)
-                
+
                 t_elapsed_ms = (time.perf_counter() - t0) * 1000.0
                 latencies_ms.append(t_elapsed_ms)
                 processed_count += 1
@@ -104,10 +118,34 @@ class BenchmarkEngine:
             avg_lat = round(statistics.mean(latencies_ms), 4) if latencies_ms else 0
             max_lat = round(max(latencies_ms), 4) if latencies_ms else 0
 
+            # Derive pipeline_status/headroom from what was actually
+            # measured, instead of unconditional "everything is fine"
+            # constants - a benchmark that always reports OPTIMAL regardless
+            # of the numbers it just measured isn't reporting anything.
+            error_rate = dissect_errors / processed_count if processed_count else 0
+            buffer_len = len(self.server_instance.packet_history) if (
+                self.server_instance and hasattr(self.server_instance, 'packet_history')) else 0
+            buffer_cap = getattr(self.server_instance.packet_history, 'maxlen', None) if (
+                self.server_instance and hasattr(self.server_instance, 'packet_history')) else None
+
+            if error_rate > 0.05 or p99 > 50:
+                pipeline_status = 'DEGRADED'
+            elif error_rate > 0 or p99 > 10:
+                pipeline_status = 'ELEVATED_LATENCY'
+            else:
+                pipeline_status = 'OPTIMAL'
+
+            if buffer_cap:
+                headroom_pct = round(max(0, (buffer_cap - buffer_len) / buffer_cap * 100), 1)
+                headroom = f'{headroom_pct}% FREE ({buffer_len}/{buffer_cap} buffered)'
+            else:
+                headroom = f'{buffer_len} packets buffered (no fixed capacity reported)'
+
             results = {
                 'status': 'ok',
                 'timestamp': time.strftime("%Y-%m-%d %H:%M:%S UTC"),
                 'packets_processed': processed_count,
+                'dissect_errors': dissect_errors,
                 'total_duration_sec': round(total_duration_sec, 4),
                 'throughput_pkts_per_sec': actual_rate,
                 'latency_stats_ms': {
@@ -117,8 +155,8 @@ class BenchmarkEngine:
                     'p99': p99,
                     'max': max_lat
                 },
-                'pipeline_status': 'OPTIMAL',
-                'memory_buffer_headroom': '100% HEALTHY'
+                'pipeline_status': pipeline_status,
+                'memory_buffer_headroom': headroom
             }
 
             with self.lock:

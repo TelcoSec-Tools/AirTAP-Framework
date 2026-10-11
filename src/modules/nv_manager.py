@@ -88,13 +88,21 @@ class NvManager:
         padded = data_bytes[:128].ljust(128, b'\x00')
         
         if nv_id > 65535:
-            # Extended 5G NV items are written via EFS item files or mock DIAG
+            # Extended 5G NV items (>64k) have no confirmed write-back path on
+            # this DIAG transport yet (modern basebands expose them via EFS
+            # item files, not the classic NV_WRITE_F opcode). The optional
+            # send_raw_pdu() hook has no defined success/failure contract, so
+            # a successful call here cannot be taken as proof the device
+            # actually accepted the write - only report DONE if it ran
+            # without raising, and NOTACTIVE (unsupported) otherwise, rather
+            # than claiming success unconditionally.
             if self.diag_input and hasattr(self.diag_input, 'send_raw_pdu'):
                 try:
                     self.diag_input.send_raw_pdu(b'\x27' + pack('<I', nv_id) + padded)
+                    return NV_STATUS_DONE
                 except Exception:
-                    pass
-            return NV_STATUS_DONE
+                    return NV_STATUS_BADPARM
+            return NV_STATUS_NOTACTIVE
 
         req_payload = pack('<H', nv_id & 0xFFFF) + padded + b'\x00\x00'
         

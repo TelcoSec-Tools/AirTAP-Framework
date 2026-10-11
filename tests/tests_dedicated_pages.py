@@ -7,12 +7,18 @@ import time
 
 from src.modules.gui_server import GuiServer
 from src.modules.sec_audit import SecurityAlert
+from tests_gui import MockDiagInput as BaseMockDiagInput
 
 
-class MockDiagInput:
+class MockDiagInput(BaseMockDiagInput):
+    """
+    Extends the protocol-correct EFS2 mock from tests_gui.py (real
+    OPENDIR/READDIR/STAT/OPEN/READ/STATFS decode paths) with the AT-command
+    and raw-PDU stubs this test file's other endpoints rely on.
+    """
+
     def __init__(self):
-        self.modules = []
-        self.filter_rat = None
+        super().__init__()
         self.filter_type = None
 
     def register_module(self, module):
@@ -104,6 +110,10 @@ class TestDedicatedPagesAndCalea(unittest.TestCase):
             self.assertIn('TELCOSEC-VULN-076', data['telcosec_li_rules'])
 
     def test_calea_x1_send_endpoint(self):
+        # AirTap has no outbound ADMF/X1 transport, so this endpoint only
+        # builds and schema-validates a TS 33.128 X1 request locally - it
+        # must report 'preview_only', never claim a network element was
+        # actually provisioned.
         req_data = json.dumps({
             'task_type': 'ACTIVATE_TASK',
             'target_id': '310410123456789',
@@ -119,10 +129,23 @@ class TestDedicatedPagesAndCalea(unittest.TestCase):
         with urllib.request.urlopen(req, timeout=3.0) as resp:
             self.assertEqual(resp.status, 200)
             data = json.loads(resp.read().decode('utf-8'))
-            self.assertEqual(data['status'], 'ok')
+            self.assertEqual(data['status'], 'preview_only')
             self.assertEqual(data['task_type'], 'ACTIVATE_TASK')
-            self.assertEqual(data['response_code'], 'OK_PROVISIONED')
-            self.assertIn('hmac_sha256', data)
+            self.assertEqual(data['target_id'], '310410123456789')
+            self.assertIn('request_schema', data)
+            self.assertEqual(data['request_schema']['status'], 'ok')
+            self.assertNotIn('response_code', data)
+
+        # Missing target_id/ne_id must be rejected, not silently defaulted
+        req_missing = json.dumps({'task_type': 'ACTIVATE_TASK'}).encode('utf-8')
+        req2 = urllib.request.Request(
+            f"{self.base_url}/api/calea/x1/send",
+            data=req_missing,
+            headers={'Content-Type': 'application/json'}
+        )
+        with urllib.request.urlopen(req2, timeout=3.0) as resp2:
+            data2 = json.loads(resp2.read().decode('utf-8'))
+            self.assertEqual(data2['status'], 'error')
 
     def test_device_bands_endpoint(self):
         req = urllib.request.Request(f"{self.base_url}/api/device/bands")
@@ -147,8 +170,16 @@ class TestDedicatedPagesAndCalea(unittest.TestCase):
             data = json.loads(resp.read().decode('utf-8'))
             self.assertEqual(data['status'], 'ok')
             self.assertEqual(data['total_count'], 5)
-            self.assertEqual(data['passed_count'], 5)
             self.assertIn('tests', data)
+
+            # Secure-boot/QFPROM state is never actually queried over DIAG
+            # anywhere in AirTap, so that test must honestly report SKIP
+            # rather than a fabricated PASS - verify it still does.
+            sec_test = next(t for t in data['tests'] if 'QFPROM' in t['name'])
+            self.assertEqual(sec_test['status'], 'SKIP')
+            # The other 4 real checks (DIAG bus, AT ping, SIM identity,
+            # NVRAM STATFS) should all genuinely pass against the mock.
+            self.assertEqual(data['passed_count'], 4)
 
     def test_device_at_probe_endpoint(self):
         req_data = json.dumps({'cmd': 'AT+CGMI'}).encode('utf-8')
@@ -664,7 +695,13 @@ class TestDedicatedPagesAndCalea(unittest.TestCase):
             self.assertIn('bandwidth_mhz', bts)
             self.assertIn('antenna_height_m', bts)
             self.assertIn('eirp_dbm', bts)
-            self.assertIn('fbs_trust_score', bts)
+            # This record is modeled/estimated from PCI for map display, not
+            # a real per-site security check - verify it's labeled as such
+            # and that fbs_verdict reflects the real session-wide auditor
+            # signal rather than a fabricated per-tower "VERIFIED" claim.
+            self.assertTrue(bts.get('estimated'))
+            self.assertIn('fbs_verdict', bts)
+            self.assertNotIn('VERIFIED', bts['fbs_verdict'])
             self.assertIn('security', bts)
 
         # 3. GET /api/geo/bts_details

@@ -615,25 +615,50 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
             self.send_json_response(res)
             return
         if path == '/api/calea/x1/send':
+            # AirTap has no outbound ADMF/X1 client transport - it is a passive
+            # capture/diagnostics tool, not a lawful-intercept management
+            # function. This endpoint can only build and validate a TS 33.128
+            # X1 request locally; it must never claim a network element was
+            # actually provisioned, so it never returns a fabricated success.
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length) if content_length > 0 else b'{}'
-            try: data = json.loads(body.decode('utf-8'))
-            except Exception: data = {}
+            try:
+                data = json.loads(body.decode('utf-8'))
+            except Exception:
+                data = {}
+
             task_type = data.get('task_type', 'ACTIVATE_TASK')
-            target_id = data.get('target_id', '310410123456789')
-            ne_id = data.get('ne_id', 'AMF-SIG-01')
-            
-            res = {
-                'status': 'ok',
-                'x1_transaction_id': 'X1-TX-98412-A',
-                'task_type': task_type,
-                'target_id': target_id,
-                'ne_id': ne_id,
-                'response_code': 'OK_PROVISIONED',
-                'hmac_sha256': 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                'message': f'X1 {task_type} provisioned on {ne_id} for target {target_id}'
-            }
+            target_id = data.get('target_id', '')
+            ne_id = data.get('ne_id', '')
+            hi_type = data.get('hi_type', 'HI2_IRI')
+
+            if not target_id or not ne_id:
+                res = {'status': 'error', 'error': 'target_id and ne_id are required to build an X1 request.'}
+            else:
+                from ..protocol.etsi_li import X1ProvisioningParser
+                request_doc = json.dumps({
+                    'x1RequestMessage': {
+                        'admfIdentifier': 'AIRTAP_LOCAL_PREVIEW',
+                        'requestIdentifier': f'REQ_{int(time.time())}',
+                        'taskDetails': {
+                            'xId': f'XID_{int(time.time())}',
+                            'deliveryType': hi_type,
+                            'targetIdentifiers': [{'supi': target_id}],
+                            'deliveryAddresses': {'ne_id': ne_id},
+                        },
+                    }
+                })
+                parsed = X1ProvisioningParser.parse_x1_request(request_doc)
+                res = {
+                    'status': 'preview_only',
+                    'task_type': task_type,
+                    'target_id': target_id,
+                    'ne_id': ne_id,
+                    'request_schema': parsed,
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                    'message': (f'Local TS 33.128 X1 {task_type} request built and schema-validated. '
+                                'AirTap has no ADMF/X1 transport - nothing was sent to a network element.'),
+                }
             self.send_json_response(res)
             return
 
@@ -1208,7 +1233,18 @@ class GuiServer(EnableLogMixin):
         return {'status': 'error', 'message': 'Invalid coordinates'}
 
     def handle_geo_towers(self) -> dict:
-        """Returns discovered and estimated cell tower topologies with rich BTS info."""
+        """
+        Returns discovered cell tower topologies. Only 'site_id', 'pci', 'rat',
+        'band', 'lat'/'lng', and 'rsrp' come from captured telemetry; every
+        other per-site field (node IDs, CGI, antenna/EIRP figures, carrier
+        name, security posture) is modeled/estimated from the PCI alone for
+        map visualization, not read from any device or carrier database -
+        each record is marked 'estimated': True so a caller can't mistake
+        this for authoritative RF-planning or security data.
+        """
+        has_fbs_alert = bool(self.sec_auditor and any(
+            a.category == 'FBS_HEURISTIC' for a in self.sec_auditor.alerts))
+
         towers = {}
         for pt in self.geo_history:
             pci = pt.get('pci')
@@ -1268,13 +1304,17 @@ class GuiServer(EnableLogMixin):
                         'sinr': 18.4,
                         'cqi': 15,
                         'timing_advance_m': 156.4,
-                        'fbs_trust_score': 99.2,
-                        'fbs_verdict': 'VERIFIED CARRIER BTS',
+                        'estimated': True,
+                        # fbs_verdict reflects a real signal (whether the live
+                        # security auditor has raised any FBS_HEURISTIC alert
+                        # this session) - it is a session-wide caution, not a
+                        # per-tower security clearance, since no alert is
+                        # currently linked to a specific PCI/site. Never claim
+                        # a tower is "verified" - that's not a check this
+                        # function can make.
+                        'fbs_verdict': 'FBS HEURISTIC ALERT RAISED THIS SESSION' if has_fbs_alert else 'NO FBS HEURISTIC ALERT (not a verification)',
                         'security': {
-                            'sib_neighbors': 'PRESENT (Valid SIB4/5)',
-                            'ciphering': '128-NEA2 / 128-EEA2 (AES)',
-                            'integrity': '128-NIA2 / 128-EIA2 (AES-CMAC)',
-                            'q_rx_lev_min': '-128 dBm'
+                            'note': 'Not measured for this specific tower - see Threat Radar for actual SIB-based FBS findings.',
                         },
                         'last_seen': pt.get('timestamp')
                     }
@@ -1588,13 +1628,15 @@ class GuiServer(EnableLogMixin):
             except Exception:
                 pass
         at_lat = max(2.4, (time.time() - t_at_0) * 1000)
-        at_ok = at_res and at_res.get('status') == 'ok'
+        at_ok = bool(at_res and at_res.get('status') == 'ok')
         tests.append({
             'name': 'AT Command Parser & Hayes Engine',
             'subsystem': 'Modem Control',
-            'status': 'PASS' if at_ok else ('PASS' if self.at_terminal else 'WARN'),
+            'status': 'PASS' if at_ok else ('WARN' if self.at_terminal else 'SKIP'),
             'latency_ms': round(at_lat, 2),
-            'details': 'V.250 AT command engine responded OK to AT ping' if at_ok else 'AT command bridge initialized and listening on modem tty/serial port'
+            'details': ('V.250 AT command engine responded OK to AT ping' if at_ok else
+                        'AT ping did not return OK' if self.at_terminal else
+                        'No AT terminal engine available')
         })
 
         # Test 3: SIM / UICC File System & ISO 7816 Engine
@@ -1602,28 +1644,53 @@ class GuiServer(EnableLogMixin):
         tests.append({
             'name': 'SIM / UICC ISO 7816 Cryptographic Core',
             'subsystem': 'SIM / USIM',
-            'status': 'PASS' if sim_ok else 'PASS',
+            'status': 'PASS' if sim_ok else 'WARN',
             'latency_ms': 3.15,
-            'details': 'USIM Rel-16 Milenage/TUAK AKA context active with SUCI Profile A calculation'
+            'details': ('USIM identity data present (IMSI/SIM status known)' if sim_ok else
+                        'No SIM/USIM identity data retrieved yet from the device')
         })
 
-        # Test 4: NVRAM & Calibration Storage
+        # Test 4: NVRAM & Calibration Storage - actually queries the live
+        # EFS/NVRAM partition via the real STATFS DIAG command rather than
+        # assuming success.
+        t_nv_0 = time.time()
+        nv_status, nv_detail = 'SKIP', 'No device connected - cannot query live NVRAM/EFS partition'
+        if self.diag_input:
+            try:
+                statfs_res = self._efs_raw_statfs('/')
+                nv_status = 'PASS'
+                nv_detail = (f"EFS/NVRAM partition readable: {statfs_res['used_percent']}% used "
+                              f"({statfs_res['free_blocks']}/{statfs_res['total_blocks']} blocks free)")
+            except Exception as exc:
+                nv_status = 'FAIL'
+                nv_detail = f'EFS/NVRAM STATFS query failed: {exc}'
+        nv_lat = max(1.84, (time.time() - t_nv_0) * 1000)
         tests.append({
             'name': 'NVRAM & RF Calibration Partition',
             'subsystem': 'EFS / NVRAM',
-            'status': 'PASS',
-            'latency_ms': 1.84,
-            'details': 'Non-Volatile RAM storage verified readable with valid RF calibration checksums'
+            'status': nv_status,
+            'latency_ms': round(nv_lat, 2),
+            'details': nv_detail
         })
 
         # Test 5: Hardware Security Enclave & QFPROM Fuses
-        sec_boot = self.device_info.get('secure_boot', True)
+        # No DIAG command anywhere in AirTap actually queries secure-boot /
+        # QFPROM fuse state, so 'secure_boot' is never populated from a real
+        # device and would otherwise silently default to an always-PASS
+        # placeholder. Report this honestly as unverified instead of
+        # fabricating a hardware security attestation.
+        sec_boot = self.device_info.get('secure_boot')
+        if sec_boot is None:
+            sec_status, sec_detail = 'SKIP', 'AirTap does not query secure-boot/QFPROM fuse state over DIAG - not verified'
+        else:
+            sec_status = 'PASS' if sec_boot else 'FAIL'
+            sec_detail = 'Hardware Root of Trust enforced with QFPROM fuses and anti-rollback counter'
         tests.append({
             'name': 'QTI TrustZone & QFPROM Hardware Security',
             'subsystem': 'Security Enclave',
-            'status': 'PASS' if sec_boot else 'FAIL',
+            'status': sec_status,
             'latency_ms': 0.95,
-            'details': 'Hardware Root of Trust enforced with QFPROM fuses and anti-rollback counter'
+            'details': sec_detail
         })
 
         total_lat = round((time.time() - t0) * 1000, 2)
@@ -2110,7 +2177,10 @@ class GuiServer(EnableLogMixin):
     def handle_f3_history(self, subsystem='all', level='all', limit=500):
         """Return buffered historical F3 log traces."""
         if not hasattr(self, 'f3_history') or not self.f3_history:
-            # Generate default telecom diagnostic trace history for instant preview
+            # No real F3 trace has been captured yet - this is a sample
+            # trace shown for UI preview purposes only. Clearly labeled as
+            # such (status: 'offline', simulated: True) so a caller can't
+            # mistake it for a real captured baseband trace.
             sample_traces = [
                 {'timestamp': '10:12:01.120', 'epoch': time.time() - 30, 'subsystem': 'CORE', 'severity': 'INFO', 'file': 'rex_task.c', 'line': 52, 'text': 'AMSS modem core initialized. Baseband stack SDX65 ready.', 'opcode': 121},
                 {'timestamp': '10:12:01.350', 'epoch': time.time() - 28, 'subsystem': 'SEC', 'severity': 'INFO', 'file': 'tz_crypto.c', 'line': 78, 'text': 'QTEE TrustZone Enclave authenticated. Anti-Rollback Counter=0x0003.', 'opcode': 121},
@@ -2123,7 +2193,7 @@ class GuiServer(EnableLogMixin):
                 {'timestamp': '10:12:04.600', 'epoch': time.time() - 8, 'subsystem': 'IMS', 'severity': 'INFO', 'file': 'ims_sip_stack.c', 'line': 650, 'text': 'IMS SIP REGISTER 200 OK received from P-CSCF with AKAv2 mutual auth.', 'opcode': 121},
                 {'timestamp': '10:12:05.120', 'epoch': time.time() - 4, 'subsystem': 'RRC', 'severity': 'DEBUG', 'file': 'nr_rrc_sm.c', 'line': 910, 'text': 'Neighbor cell measurement report: PCI=249 RSRP=-98dBm, PCI=250 RSRP=-104dBm.', 'opcode': 121}
             ]
-            return {'status': 'ok', 'total': len(sample_traces), 'logs': sample_traces}
+            return {'status': 'offline', 'simulated': True, 'total': len(sample_traces), 'logs': sample_traces}
 
         logs = list(self.f3_history)
         if subsystem != 'all':
@@ -2190,7 +2260,12 @@ class GuiServer(EnableLogMixin):
     # =========================================================================
 
     def _get_mock_efs_tree(self):
-        """Standard Qualcomm Baseband EFS hierarchy and telecom files."""
+        """
+        Sample Qualcomm Baseband EFS hierarchy, used ONLY as a fallback when
+        no live device is connected (self.diag_input is None) so the GUI has
+        something to render in a demo/offline context. Never used to mask a
+        failed read against a real device - those surface as an error instead.
+        """
         return {
             '/': [
                 {'name': 'nv', 'type': 'dir', 'is_dir': True, 'size': 4096, 'path': '/nv', 'mode': '0755', 'perms': 'rwxr-xr-x', 'mtime': '2026-08-14 10:12:00'},
@@ -2253,138 +2328,255 @@ class GuiServer(EnableLogMixin):
             ]
         }
 
+    # -------------------------------------------------------------------
+    # Raw EFS2 DIAG protocol helpers (mirrors efs_shell_commands/*.py, but
+    # returns structured data for the GUI's JSON API instead of printing).
+    # -------------------------------------------------------------------
+
+    def _efs_handshake(self):
+        """Perform the EFS2 HELLO handshake required before any FS op."""
+        from .efs_shell import EfsShell
+        EfsShell(self.diag_input).send_efs_handshake()
+
+    def _efs_mode_to_perms(self, mode: int, is_dir: bool) -> str:
+        file_rights = ''
+        for shift in range(8, -1, -1):
+            file_rights += 'rwx'[(8 - shift) % 3] if (mode & (1 << shift)) else '-'
+        return file_rights
+
+    def _efs_raw_readdir(self, dir_path: str):
+        """Run OPENDIR/READDIR/CLOSEDIR against the live device and return
+        a list of entry dicts for dir_path. Raises on protocol/device error -
+        callers decide how to surface that, this never fabricates data."""
+        from ..protocol.subsystems import DIAG_SUBSYS_FS
+        from ..protocol.messages import DIAG_SUBSYS_CMD_F
+        from ..protocol.efs2 import (EFS2_DIAG_OPENDIR, EFS2_DIAG_READDIR, EFS2_DIAG_CLOSEDIR,
+                                      EFS2_ERROR_CODES, efs2_file_type_name)
+
+        self._efs_handshake()
+
+        opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BH',
+            DIAG_SUBSYS_FS, EFS2_DIAG_OPENDIR) + dir_path.encode('latin1') + b'\x00', accept_error=True)
+
+        if opcode != DIAG_SUBSYS_CMD_F:
+            raise IOError(f'OPENDIR failed: unexpected opcode {opcode!r}')
+
+        cmd_subsystem_id, subcommand_code, dir_fd, errno = struct.unpack('<BHIi', payload)
+        if errno:
+            raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+        entries = []
+        try:
+            sequence_number = 1
+            readdir_struct = '<BHI8i'
+            readdir_size = struct.calcsize(readdir_struct)
+            while True:
+                opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BHIi',
+                    DIAG_SUBSYS_FS, EFS2_DIAG_READDIR, dir_fd, sequence_number), accept_error=False)
+
+                (cmd_subsystem_id, subcommand_code, dir_fd, sequence_number, errno,
+                 entry_type, mode, size, atime, mtime, ctime) = struct.unpack(readdir_struct, payload[:readdir_size])
+
+                entry_path = payload[readdir_size:]
+
+                if errno:
+                    raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+                name = entry_path.rstrip(b'\x00').decode('latin1', errors='replace')
+                if not name:
+                    break
+                if name in ('.', '..'):
+                    sequence_number += 1
+                    continue
+
+                is_dir = (entry_type == 0x01) or ((mode & 0o170000) == 0o040000)
+                entries.append({
+                    'name': name,
+                    'type': 'dir' if is_dir else 'file',
+                    'is_dir': is_dir,
+                    'size': 0 if is_dir else size,
+                    'path': (dir_path.rstrip('/') + '/' + name),
+                    'mode': oct(mode & 0o777)[2:].zfill(4),
+                    'perms': self._efs_mode_to_perms(mode, is_dir),
+                    'mtime': datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S'),
+                    'atime': datetime.datetime.fromtimestamp(atime).strftime('%Y-%m-%d %H:%M:%S'),
+                    'ctime': datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S'),
+                    'file_type_name': efs2_file_type_name(mode),
+                })
+                sequence_number += 1
+        finally:
+            opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BHi',
+                DIAG_SUBSYS_FS, EFS2_DIAG_CLOSEDIR, dir_fd))
+
+        return entries
+
+    def _efs_raw_stat(self, file_path: str):
+        """Run STAT against the live device and return a dict of metadata."""
+        from ..protocol.subsystems import DIAG_SUBSYS_FS
+        from ..protocol.messages import DIAG_SUBSYS_CMD_F
+        from ..protocol.efs2 import EFS2_DIAG_STAT, EFS2_ERROR_CODES, efs2_file_type_name
+
+        self._efs_handshake()
+
+        opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BH',
+            DIAG_SUBSYS_FS, EFS2_DIAG_STAT) + file_path.encode('latin1') + b'\x00', accept_error=True)
+
+        if opcode != DIAG_SUBSYS_CMD_F:
+            raise IOError(f'STAT failed: unexpected opcode {opcode!r}')
+
+        cmd_subsystem_id, subcommand_code, errno, mode, size, num_links, atime, mtime, ctime = \
+            struct.unpack('<BH7i', payload)
+
+        if errno:
+            raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+        is_dir = (mode & 0o170000) == 0o040000
+        name = file_path.rstrip('/').split('/')[-1] or '/'
+
+        return {
+            'status': 'ok',
+            'path': file_path,
+            'name': name,
+            'is_dir': is_dir,
+            'type': efs2_file_type_name(mode),
+            'size': size,
+            'size_fmt': f'{size:,} Bytes',
+            'mode': oct(mode & 0o777)[2:].zfill(4),
+            'permissions': self._efs_mode_to_perms(mode, is_dir),
+            'hardlinks': num_links,
+            'atime': datetime.datetime.fromtimestamp(atime).strftime('%Y-%m-%d %H:%M:%S'),
+            'mtime': datetime.datetime.fromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S'),
+            'ctime': datetime.datetime.fromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S'),
+        }
+
+    def _efs_raw_read_file(self, file_path: str) -> bytes:
+        """Run OPEN/READ/CLOSE against the live device and return raw bytes."""
+        from ..protocol.subsystems import DIAG_SUBSYS_FS
+        from ..protocol.messages import DIAG_SUBSYS_CMD_F
+        from ..protocol.efs2 import EFS2_DIAG_OPEN, EFS2_DIAG_READ, EFS2_DIAG_CLOSE, EFS2_ERROR_CODES
+
+        self._efs_handshake()
+
+        opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BHii',
+            DIAG_SUBSYS_FS, EFS2_DIAG_OPEN, 0x0, 0) + file_path.encode('latin1') + b'\x00', accept_error=True)
+
+        if opcode != DIAG_SUBSYS_CMD_F:
+            raise IOError(f'OPEN failed: unexpected opcode {opcode!r}')
+
+        cmd_subsystem_id, subcommand_code, file_fd, errno = struct.unpack('<BHIi', payload)
+        if errno:
+            raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+        try:
+            bytes_read = b''
+            BYTES_TO_READ = 4096
+            read_struct = '<BHiIii'
+            read_header_size = struct.calcsize(read_struct)
+            while True:
+                opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BHiII',
+                    DIAG_SUBSYS_FS, EFS2_DIAG_READ, file_fd, BYTES_TO_READ, len(bytes_read)))
+
+                cmd_subsystem_id, subcommand_code, file_fd, offset, num_bytes_read, errno = \
+                    struct.unpack(read_struct, payload[:read_header_size])
+
+                chunk = payload[read_header_size:]
+                if errno:
+                    raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+                bytes_read += chunk
+                if len(chunk) < BYTES_TO_READ:
+                    break
+            return bytes_read
+        finally:
+            self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BHi',
+                DIAG_SUBSYS_FS, EFS2_DIAG_CLOSE, file_fd))
+
+    def _efs_raw_statfs(self, path: str = '/'):
+        """Run STATFS against the live device and return capacity stats."""
+        from ..protocol.subsystems import DIAG_SUBSYS_FS
+        from ..protocol.messages import DIAG_SUBSYS_CMD_F
+        from ..protocol.efs2 import EFS2_DIAG_STATFS, EFS2_ERROR_CODES
+
+        self._efs_handshake()
+
+        remote_path = (path.rstrip('/') or '/').encode('latin1') + b'\x00'
+
+        opcode, payload = self.diag_input.send_recv(DIAG_SUBSYS_CMD_F, struct.pack('<BH',
+            DIAG_SUBSYS_FS, EFS2_DIAG_STATFS) + remote_path, accept_error=True)
+
+        if opcode != DIAG_SUBSYS_CMD_F:
+            raise IOError(f'STATFS failed: unexpected opcode {opcode!r}')
+
+        statfs_struct = '<BHI8i'
+        statfs_size = struct.calcsize(statfs_struct)
+        if len(payload) < statfs_size:
+            raise IOError('STATFS response too short')
+
+        (cmd_subsystem_id, subcommand_code, errno, f_type, f_bsize, f_blocks, f_bfree,
+         f_bavail, f_files, f_ffree, f_favail) = struct.unpack(statfs_struct, payload[:statfs_size])
+
+        if errno:
+            raise IOError(EFS2_ERROR_CODES.get(errno, f'errno {errno}'))
+
+        f_bsize = max(f_bsize, 512)
+        total_bytes = f_blocks * f_bsize
+        free_bytes = f_bfree * f_bsize
+        used_bytes = max(total_bytes - free_bytes, 0)
+        used_percent = round((used_bytes / total_bytes * 100.0), 1) if total_bytes > 0 else 0.0
+
+        return {
+            'status': 'ok',
+            'mount_point': path,
+            'filesystem_type': 'EFS2 Flash Filesystem' if f_type == 0 else f'EFS2 Type 0x{f_type:04X}',
+            'block_size': f_bsize,
+            'total_blocks': f_blocks,
+            'free_blocks': f_bfree,
+            'available_blocks': f_bavail,
+            'total_bytes': total_bytes,
+            'used_bytes': used_bytes,
+            'free_bytes': free_bytes,
+            'used_percent': used_percent,
+            'total_inodes': f_files,
+            'free_inodes': f_ffree,
+            'used_inodes': max(f_files - f_ffree, 0),
+        }
+
     def handle_efs_ls(self, dir_path):
         normalized = '/' + dir_path.strip('/').strip()
-        tree = self._get_mock_efs_tree()
-        sample_files = tree.get(normalized, [])
         if not self.diag_input:
-            return {'status': 'ok', 'path': normalized, 'files': sample_files}
+            tree = self._get_mock_efs_tree()
+            return {'status': 'offline', 'path': normalized, 'files': tree.get(normalized, [])}
         try:
-            from .efs_shell import EfsShell
-            shell = EfsShell(self.diag_input)
-            entries = shell.efs.opendir(dir_path)
-            res = []
-            for e in entries:
-                mode_oct = oct(getattr(e, 'mode', 0o644) & 0o777)[2:].zfill(4)
-                res.append({
-                    'name': e.name,
-                    'type': 'dir' if e.is_dir else 'file',
-                    'is_dir': e.is_dir,
-                    'size': getattr(e, 'size', 0),
-                    'path': (dir_path.rstrip('/') + '/' + e.name),
-                    'mode': mode_oct,
-                    'perms': 'rwxr-xr-x' if e.is_dir else 'rw-r--r--',
-                    'mtime': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                })
-            return {'status': 'ok', 'path': normalized, 'files': res}
-        except Exception:
-            return {'status': 'ok', 'path': normalized, 'files': sample_files}
+            entries = self._efs_raw_readdir(dir_path)
+            return {'status': 'ok', 'path': normalized, 'files': entries}
+        except Exception as exc:
+            return {'status': 'error', 'path': normalized, 'files': [], 'error': str(exc)}
 
     def handle_efs_cat(self, file_path):
-        import hashlib, base64
-        # Standard realistic mock contents based on file
-        p = file_path.lower()
-        if 'carrier_policy' in p:
-            content = """<?xml version="1.0" encoding="UTF-8"?>
-<!-- Qualcomm Policyman Carrier Policy Configuration -->
-<carrier_policy version="3.0">
-    <plmn_list name="home_network">
-        <plmn>310-410</plmn>
-        <plmn>310-260</plmn>
-    </plmn_list>
-    <rf_bands>
-        <lte_bands>1, 2, 3, 4, 5, 7, 8, 12, 20, 28, 38, 40, 66, 71</lte_bands>
-        <nr_bands>n1, n3, n5, n28, n41, n71, n77, n78</nr_bands>
-    </rf_bands>
-    <feature_flags>
-        <volte_enabled>true</volte_enabled>
-        <vonr_enabled>true</vonr_enabled>
-        <ca_4x4_mimo>true</ca_4x4_mimo>
-        <eutra_nr_dual_connectivity>true</eutra_nr_dual_connectivity>
-    </feature_flags>
-    <roaming_policy prefer_home="true" anti_steering_defense="enforced"/>
-</carrier_policy>"""
-        elif 'sip_config' in p or 'ims' in p and p.endswith('.xml'):
-            content = """<?xml version="1.0" encoding="UTF-8"?>
-<ims_configuration version="2.1">
-    <sip_stack>
-        <transport>TLS</transport>
-        <port>5061</port>
-        <timer_t1>500</timer_t1>
-        <timer_b>32000</timer_b>
-        <keep_alive_interval>120</keep_alive_interval>
-    </sip_stack>
-    <security_mechanism>
-        <auth_algorithm>AKAv2-MD5</auth_algorithm>
-        <ipsec_encapsulation>ESP-3DES-SHA1</ipsec_encapsulation>
-    </security_mechanism>
-    <media_codecs>
-        <codec name="AMR-WB" bitrate="23.85" priority="1"/>
-        <codec name="EVS" mode="SWB" bitrate="13.2" priority="2"/>
-    </media_codecs>
-</ims_configuration>"""
-        elif 'build.prop' in p:
-            content = """# Qualcomm Baseband Firmware Properties
-ro.baseband.chipset=SDX65
-ro.baseband.modem=MPSS.DE.1.0-00123
-ro.baseband.qdsp6=v68
-ro.carrier.default=ATT_US
-ro.build.date=2026-08-14 08:30:00 UTC
-ro.security.trustzone=enforced
-ro.security.anti_rollback=3"""
-        elif p.endswith('.json'):
-            content = """{
-  "trustzone_version": "4.2.1",
-  "secure_boot": true,
-  "qfprom_fused": true,
-  "rpmb_key_provisioned": true,
-  "crypto_enclave": "QTEE_V2",
-  "anti_rollback_version": 3
-}"""
-        elif p.endswith('.bin') or p.endswith('.prl') or p.endswith('.dat') or p.endswith('.db'):
-            # Binary mock payload
-            raw_bytes = bytes([0x51, 0x43, 0x4F, 0x4D, 0x01, 0x00, 0x00, 0x00] + [(i * 17) % 256 for i in range(120)])
-            hex_str = raw_bytes.hex()
-            b64_str = base64.b64encode(raw_bytes).decode('ascii')
-            md5_hash = hashlib.md5(raw_bytes).hexdigest()
-            return {
-                'status': 'ok',
-                'path': file_path,
-                'is_binary': True,
-                'size': len(raw_bytes),
-                'md5': md5_hash,
-                'content': raw_bytes.decode('latin-1', errors='replace'),
-                'hex': hex_str,
-                'base64': b64_str
-            }
-        else:
-            content = f"# Configuration file: {file_path}\n# Generated by Qualcomm EFS subsystem\nenabled=1\nlog_level=3\ntimeout_ms=5000\n"
-
-        content_bytes = content.encode('utf-8')
-        md5_hash = hashlib.md5(content_bytes).hexdigest()
-        b64_str = base64.b64encode(content_bytes).decode('ascii')
-
         if not self.diag_input:
+            tree = self._get_mock_efs_tree()
+            found = next((item for items in tree.values() for item in items if item['path'] == file_path), None)
+            content = f"# Offline demo mode - no device connected.\n# Sample entry: {found}\n" if found else \
+                f"# Offline demo mode - no device connected.\n# No sample data for {file_path}\n"
+            content_bytes = content.encode('utf-8')
             return {
-                'status': 'ok',
+                'status': 'offline',
                 'path': file_path,
                 'is_binary': False,
                 'size': len(content_bytes),
-                'md5': md5_hash,
+                'md5': hashlib.md5(content_bytes).hexdigest(),
                 'content': content,
                 'hex': content_bytes.hex(),
-                'base64': b64_str
+                'base64': base64.b64encode(content_bytes).decode('ascii'),
             }
 
         try:
-            from .efs_shell import EfsShell
-            shell = EfsShell(self.diag_input)
-            fd = shell.efs.open(file_path, 0)
-            data = shell.efs.read(fd, 16384)
-            shell.efs.close(fd)
+            data = self._efs_raw_read_file(file_path)
             is_bin = False
             try:
                 text_content = data.decode('utf-8')
+                if not text_content.isprintable() and text_content.strip(' \t\r\n'):
+                    is_bin = True
             except Exception:
                 is_bin = True
                 text_content = data.decode('latin-1', errors='replace')
@@ -2396,107 +2588,97 @@ ro.security.anti_rollback=3"""
                 'md5': hashlib.md5(data).hexdigest(),
                 'content': text_content,
                 'hex': data.hex(),
-                'base64': base64.b64encode(data).decode('ascii')
+                'base64': base64.b64encode(data).decode('ascii'),
             }
-        except Exception:
-            return {
-                'status': 'ok',
-                'path': file_path,
-                'is_binary': False,
-                'size': len(content_bytes),
-                'md5': md5_hash,
-                'content': content,
-                'hex': content_bytes.hex(),
-                'base64': b64_str
-            }
+        except Exception as exc:
+            return {'status': 'error', 'path': file_path, 'error': str(exc)}
 
     def handle_efs_stat(self, file_path):
-        import hashlib
-        name = file_path.rstrip('/').split('/')[-1] or '/'
-        tree = self._get_mock_efs_tree()
-        found_entry = None
-        for folder, items in tree.items():
-            for item in items:
-                if item['path'] == file_path:
-                    found_entry = item
-                    break
-            if found_entry: break
+        if not self.diag_input:
+            tree = self._get_mock_efs_tree()
+            found = next((item for items in tree.values() for item in items if item['path'] == file_path), None)
+            if not found:
+                return {'status': 'offline', 'path': file_path, 'error': 'No device connected and no sample entry for this path'}
+            return {
+                'status': 'offline',
+                'path': file_path,
+                'name': found['name'],
+                'is_dir': found['is_dir'],
+                'type': 'Directory' if found['is_dir'] else 'Regular File',
+                'size': found['size'],
+                'size_fmt': f"{found['size']:,} Bytes",
+                'mode': found['mode'],
+                'permissions': found['perms'],
+                'hardlinks': 2 if found['is_dir'] else 1,
+                'atime': found['mtime'],
+                'mtime': found['mtime'],
+                'ctime': found['mtime'],
+            }
 
-        size = found_entry['size'] if found_entry else 2480
-        mode = found_entry['mode'] if found_entry else '0644'
-        perms = found_entry['perms'] if found_entry else 'rw-r--r--'
-        is_dir = found_entry['is_dir'] if found_entry else False
-        mtime = found_entry['mtime'] if found_entry else '2026-08-14 12:40:18'
-
-        dummy_data = f"{file_path}_{size}".encode('utf-8')
-        md5_val = hashlib.md5(dummy_data).hexdigest()
-        sha256_val = hashlib.sha256(dummy_data).hexdigest()
-
-        return {
-            'status': 'ok',
-            'path': file_path,
-            'name': name,
-            'is_dir': is_dir,
-            'type': 'Directory' if is_dir else 'Regular File',
-            'size': size,
-            'size_fmt': f'{size:,} Bytes',
-            'mode': mode,
-            'permissions': perms,
-            'uid': 0,
-            'gid': 0,
-            'user': 'root',
-            'group': 'radio',
-            'inode': 1042 + (hash(file_path) % 500),
-            'hardlinks': 1 if not is_dir else 2,
-            'atime': mtime,
-            'mtime': mtime,
-            'ctime': mtime,
-            'md5': md5_val,
-            'sha256': sha256_val
-        }
+        try:
+            return self._efs_raw_stat(file_path)
+        except Exception as exc:
+            return {'status': 'error', 'path': file_path, 'error': str(exc)}
 
     def handle_efs_statfs(self):
         """Return baseband NAND/NOR flash EFS filesystem capacity statistics."""
-        return {
-            'status': 'ok',
-            'mount_point': '/efs',
-            'filesystem_type': 'EFS2 / YAFFS2 NAND',
-            'block_size': 4096,
-            'total_blocks': 16384,
-            'free_blocks': 9445,
-            'available_blocks': 9445,
-            'total_bytes': 67108864,         # 64.0 MB
-            'used_bytes': 28419072,          # 27.1 MB
-            'free_bytes': 38689792,          # 36.9 MB
-            'used_percent': 42.3,
-            'total_inodes': 2048,
-            'free_inodes': 1642,
-            'used_inodes': 406,
-            'max_path_len': 1024,
-            'max_filename_len': 255
-        }
+        if not self.diag_input:
+            return {'status': 'offline', 'error': 'No device connected - cannot query live EFS filesystem capacity.'}
+
+        try:
+            return self._efs_raw_statfs('/')
+        except Exception as exc:
+            return {'status': 'error', 'error': str(exc)}
 
     def handle_efs_search(self, query: str, root_path: str = '/'):
         """Recursively search files in EFS matching query."""
         q = query.lower().strip()
-        tree = self._get_mock_efs_tree()
+
+        if not self.diag_input:
+            tree = self._get_mock_efs_tree()
+            results = [item for items in tree.values() for item in items
+                       if q in item['name'].lower() or q in item['path'].lower()]
+            return {'status': 'offline', 'query': query, 'count': len(results), 'results': results}
+
         results = []
-        for folder, items in tree.items():
-            for item in items:
-                if q in item['name'].lower() or q in item['path'].lower():
-                    results.append(item)
-        return {'status': 'ok', 'query': query, 'count': len(results), 'results': results}
+        visited = set()
+
+        def _walk(path):
+            if path in visited:
+                return
+            visited.add(path)
+            try:
+                entries = self._efs_raw_readdir(path)
+            except Exception:
+                return
+            for entry in entries:
+                if q in entry['name'].lower() or q in entry['path'].lower():
+                    results.append(entry)
+                if entry['is_dir']:
+                    _walk(entry['path'])
+
+        try:
+            _walk(root_path.rstrip('/') or '/')
+            return {'status': 'ok', 'query': query, 'count': len(results), 'results': results}
+        except Exception as exc:
+            return {'status': 'error', 'query': query, 'error': str(exc)}
 
     def handle_efs_download(self, file_path):
         """Serve raw file bytes for browser download."""
         res = self.handle_efs_cat(file_path)
-        content_str = res.get('content', '')
         filename = file_path.rstrip('/').split('/')[-1] or 'efs_file.bin'
         ctype = 'application/octet-stream'
         if filename.endswith('.xml'): ctype = 'application/xml'
         elif filename.endswith('.json'): ctype = 'application/json'
         elif filename.endswith('.cfg') or filename.endswith('.conf') or filename.endswith('.prop'): ctype = 'text/plain'
-        return content_str.encode('utf-8', errors='replace'), ctype, filename
+
+        if res.get('status') == 'error':
+            error_bytes = f"# Error reading {file_path}: {res.get('error')}\n".encode('utf-8')
+            return error_bytes, 'text/plain; charset=utf-8', filename
+
+        if res.get('is_binary'):
+            return bytes.fromhex(res['hex']), ctype, filename
+        return res.get('content', '').encode('utf-8', errors='replace'), ctype, filename
 
     # =========================================================================
     # Qualcomm Non-Volatile (NV) RAM Operations
@@ -2566,7 +2748,7 @@ ro.security.anti_rollback=3"""
             'raw_hex': default_hex,
             'hex_128': (default_hex.replace(' ', '') + '00'*120).upper(),
             'value': self._format_nv_value(nv_id, raw_bytes),
-            'status_name': 'SUCCESS (OEM Cached)',
+            'status_name': 'NOT_READ (Showing OEM Default - No Device Connected)',
             'is_live': False
         }
 
@@ -2608,32 +2790,48 @@ ro.security.anti_rollback=3"""
         return {'status': 'ok', 'total': len(items), 'items': items}
 
     def handle_nv_write(self, data: dict) -> dict:
+        from .nv_manager import NV_STATUS_DONE, NV_STATUS_NAMES
+
         nv_id = int(data.get('id', 0))
         hex_data = data.get('hex_data', '').replace(' ', '').replace('0x', '').replace('0X', '')
-        
+
         # If band lock request
         if 'bands' in data:
             rat = data.get('rat', '5G')
             bands = data.get('bands', [])
             if self.nv_manager:
+                # set_band_lock() already checks the modem's real status code
+                # before reporting 'ok' - nothing to fabricate here.
                 return self.nv_manager.set_band_lock(rat, bands)
-            return {'status': 'ok', 'message': f'Band lock configured for {rat}: {bands}', 'bands': bands}
+            return {'status': 'offline', 'error': 'No device connected - band lock was not sent anywhere.',
+                    'bands': bands}
 
         # Direct NV Item Write
         if self.nv_manager and self.diag_input:
             try:
                 raw_bytes = bytes.fromhex(hex_data) if hex_data else b'\x00' * 8
                 status = self.nv_manager.write_nv_item(nv_id, raw_bytes)
+                status_name = NV_STATUS_NAMES.get(status, f'ERR_{status}')
+                if status == NV_STATUS_DONE:
+                    return {
+                        'status': 'ok',
+                        'message': f'NV item #{nv_id} updated successfully',
+                        'nv_id': nv_id,
+                        'status_code': status,
+                        'status_name': status_name,
+                    }
                 return {
-                    'status': 'ok',
-                    'message': f'NV item #{nv_id} updated successfully' if status == 0 else f'NV item #{nv_id} written (modem status: {status})',
+                    'status': 'error',
+                    'message': f'NV item #{nv_id} write rejected by modem ({status_name})',
                     'nv_id': nv_id,
-                    'status_code': status
+                    'status_code': status,
+                    'status_name': status_name,
                 }
             except Exception as e:
                 return {'status': 'error', 'error': str(e)}
 
-        return {'status': 'ok', 'message': f'NV item #{nv_id} updated in baseband cache', 'nv_id': nv_id}
+        return {'status': 'offline', 'error': f'No device connected - NV item #{nv_id} was not written anywhere.',
+                'nv_id': nv_id}
 
     def handle_nv_dump(self) -> dict:
         dump = {}

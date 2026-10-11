@@ -121,7 +121,7 @@ class AtTerminalEngine:
             except Exception as e:
                 res_output = f"{cmd_clean}\r\nERROR: {e}"
         else:
-            res_output = self._simulate_or_fallback(cmd_clean)
+            res_output = self._simulate_or_fallback(cmd_clean) + "\r\n[SIMULATED - no DIAG device connected]"
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         record = {
@@ -155,26 +155,30 @@ class AtTerminalEngine:
         opcode = raw_bytes[0] if raw_bytes else 0x00
         op_name = OPCODE_NAMES.get(opcode, f"Opcode 0x{opcode:02X}")
 
+        comm_failed = False
         if self.diag_input and hasattr(self.diag_input, 'send_recv'):
             try:
                 resp_op, resp_payload = self.diag_input.send_recv(opcode, raw_bytes[1:], accept_error=True)
                 resp_hex = bytes([resp_op] + list(resp_payload or b'')).hex().upper()
                 output_str = f"DIAG RESPONSE ({op_name} / 0x{resp_op:02X}):\nHex: {resp_hex}\nASCII: {self._format_ascii_preview(resp_payload or b'')}"
             except Exception as e:
-                output_str = self._simulate_diag_response(opcode, raw_bytes)
+                comm_failed = True
+                output_str = f"ERROR: DIAG request failed on live device ({op_name} / 0x{opcode:02X}): {e}"
         elif self.diag_input and hasattr(self.diag_input, 'send_diag_cmd'):
             try:
                 resp = self.diag_input.send_diag_cmd(raw_bytes)
                 resp_hex = (resp or b'').hex().upper()
                 output_str = f"DIAG RESPONSE ({op_name} / 0x{opcode:02X}):\nHex: {resp_hex}\nASCII: {self._format_ascii_preview(resp or b'')}"
             except Exception as e:
-                output_str = self._simulate_diag_response(opcode, raw_bytes)
+                comm_failed = True
+                output_str = f"ERROR: DIAG request failed on live device ({op_name} / 0x{opcode:02X}): {e}"
         else:
-            output_str = self._simulate_diag_response(opcode, raw_bytes)
+            output_str = self._simulate_diag_response(opcode, raw_bytes) + \
+                "\n  [SIMULATED - no DIAG device connected]"
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         record = {
-            'status': 'ok',
+            'status': 'error' if comm_failed else 'ok',
             'cmd': f"DIAG: {hex_str}",
             'mode': 'DIAG',
             'opcode': f"0x{opcode:02X}",
@@ -245,7 +249,9 @@ class AtTerminalEngine:
         opcode, resp = self.diag_input.send_recv(0x4B, header + payload, accept_error=True)
         if resp and len(resp) > 4:
             return resp[4:].decode('ascii', errors='replace').strip()
-        return self._simulate_or_fallback(cmd_str)
+        # A connected device responded with no/too-short payload - report that
+        # honestly instead of substituting a canned reply for a real reply.
+        return f"ERROR: no usable response from device for '{cmd_str}' (got {len(resp or b'')} bytes)"
 
     def _format_ascii_preview(self, b: bytes) -> str:
         return ''.join(chr(x) if 32 <= x <= 126 else '.' for x in b)

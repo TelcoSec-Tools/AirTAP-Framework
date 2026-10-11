@@ -71,14 +71,16 @@ function openBtsInspector(bts) {
     setText('bts-ant-bw', `${bts.beamwidth_deg || 65.0}° (3dB HPBW)`);
     setText('bts-ant-tilt', `${bts.mechanical_downtilt_deg || 2.0}° Mech / ${bts.electrical_downtilt_deg || 4.0}° Elec`);
 
-    // Security
-    setText('bts-sec-score', `${bts.fbs_trust_score || 99.2}% (${bts.fbs_verdict || 'VERIFIED OPERATOR BTS'})`);
-    if (bts.security) {
-        setText('bts-sec-sib', bts.security.sib_neighbors || 'PRESENT (Valid SIB4/5)');
-        setText('bts-sec-qrx', bts.security.q_rx_lev_min || '-128 dBm');
-        setText('bts-sec-ciph', bts.security.ciphering || '128-NEA2 / 128-EEA2 (AES)');
-        setText('bts-sec-integ', bts.security.integrity || '128-NIA2 / 128-EIA2 (AES-CMAC)');
-    }
+    // Security - this tower record is modeled from PCI for map display, not
+    // a real per-site security check. fbs_verdict only reflects whether the
+    // live security auditor has raised ANY FBS heuristic alert this
+    // session - it is not a verdict about this specific tower. See the
+    // Threat Radar tab for actual SIB-based FBS findings.
+    setText('bts-sec-score', bts.fbs_verdict || 'NOT CHECKED');
+    setText('bts-sec-sib', (bts.security && bts.security.note) || 'Not measured for this tower.');
+    setText('bts-sec-qrx', '—');
+    setText('bts-sec-ciph', '—');
+    setText('bts-sec-integ', '—');
 }
 
 
@@ -1194,13 +1196,13 @@ PS-PDU ::= SEQUENCE {
 }
 
 function sendX1ProvisioningRequest() {
-    const targetId = document.getElementById('x1-input-target')?.value.trim() || '310410123456789';
-    const neId = document.getElementById('x1-input-ne')?.value.trim() || 'AMF-SIG-01';
+    const targetId = document.getElementById('x1-input-target')?.value.trim() || '';
+    const neId = document.getElementById('x1-input-ne')?.value.trim() || '';
     const action = document.getElementById('x1-select-action')?.value || 'ACTIVATE_TASK';
     const hiType = document.getElementById('x1-select-hi')?.value || 'HI2_IRI';
 
     const respBox = document.getElementById('x1-response-box');
-    if (respBox) respBox.textContent = 'Sending X1 Provisioning Request to baseband network element…';
+    if (respBox) respBox.textContent = 'Building & validating local TS 33.128 X1 request (no network transport)…';
 
     fetch('/api/calea/x1/send', {
         method: 'POST',
@@ -1212,12 +1214,16 @@ function sendX1ProvisioningRequest() {
         if (respBox) {
             respBox.textContent = JSON.stringify(data, null, 2);
         }
-        showToast(`X1 ${action} executed successfully`, 'success');
+        if (data.status === 'preview_only') {
+            showToast(`X1 ${action} request built locally (preview only - not sent)`, 'info');
+        } else {
+            showToast(data.error || 'X1 request validation failed', 'error');
+        }
         loadCaleaStats();
         loadCaleaSessions();
     })
     .catch(err => {
-        if (respBox) respBox.textContent = `// Error executing X1 request: ${err.message}`;
+        if (respBox) respBox.textContent = `// Error building X1 request: ${err.message}`;
         showToast('X1 provisioning request error', 'error');
     });
 }

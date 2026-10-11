@@ -391,7 +391,11 @@ class StatsDumper(EnableLogMixin):
         lines.append("--------------------------------------------------")
         lines.append(" Cellular Security & Threat Analysis:")
         if not sec:
-            lines.append("   - Status:         [OK] No null ciphering or spoofing detected")
+            # This module only watches for ETWS/CMAS emergency broadcasts and
+            # CALEA trace events (see on_log() above) - it never checks
+            # ciphering/integrity algorithms or runs spoofing heuristics
+            # (that's sec_audit.py's job), so don't claim it did.
+            lines.append("   - Status:         [OK] No emergency broadcast or CALEA trace events detected")
         else:
             lines.append(f"   - Status:         [ALERT] {len(sec)} security event(s) detected!")
             for ev in sec[:5]:

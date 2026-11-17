@@ -3,6 +3,26 @@
 --              Detects Temporary Block Flow (TBF) hijacking, Uplink State Flag (USF) spoofing,
 --              and radio resource exhaustion DoS.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local pt_names = { [0]="RLC Data Block", [1]="RLC/MAC Control Block (Optional Octets)", [2]="RLC/MAC Control Block", [3]="Reserved" }
+
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, gprs_rlc_mac_proto = pcall(Proto, "gprs_rlc_mac_sec", "TelcoSec GPRS/EGPRS RLC/MAC Analyzer")
 if not ok or not gprs_rlc_mac_proto then return end
 
@@ -61,7 +81,6 @@ function gprs_rlc_mac_proto.dissector(tvb, pinfo, tree)
     local rrbp = bit.rshift(bit.band(byte0, 0x30), 4)
     local usf = bit.band(byte0, 0x07)
 
-    local pt_names = { [0]="RLC Data Block", [1]="RLC/MAC Control Block (Optional Octets)", [2]="RLC/MAC Control Block", [3]="Reserved" }
     local pt_str = pt_names[pt] or string.format("Type %d", pt)
 
     local subtree = tree:add(gprs_rlc_mac_proto, tvb(), string.format("GPRS RLC/MAC: %s (USF: %d)", pt_str, usf))

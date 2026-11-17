@@ -3,6 +3,10 @@
 --              Detects malicious 5G SA inter-cell handover hijacks, unauthorized Xn Setup,
 --              and 5G cell load-dumping DoS attacks.
 
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local pdu_types = { [0]="InitiatingMessage", [1]="SuccessfulOutcome", [2]="UnsuccessfulOutcome" }
+
 local ok, xnap_sec_proto = pcall(Proto, "xnap_sec", "TelcoSec 5G XnAP (Inter-gNB) Security Analyzer")
 if not ok or not xnap_sec_proto then return end
 
@@ -57,7 +61,6 @@ function xnap_sec_proto.dissector(tvb, pinfo, tree)
     local pdu_type_id = tvb(0, 1):uint()
     local proc_code = tvb(1, 1):uint()
 
-    local pdu_types = { [0]="InitiatingMessage", [1]="SuccessfulOutcome", [2]="UnsuccessfulOutcome" }
     local pdu_type_str = pdu_types[pdu_type_id] or string.format("PDU Type %d", pdu_type_id)
     local proc_name = XNAP_PROC_CODES[proc_code] or string.format("Procedure %d", proc_code)
 

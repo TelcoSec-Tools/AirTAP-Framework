@@ -5,6 +5,22 @@
 --              Detects intelligent network call hijacking, wiretap redirection, telecom toll fraud,
 --              covert CAMEL location harvesting, and billing bypass vulnerabilities.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, cap_sec_proto = pcall(Proto, "camel_cap_sec", "TelcoSec 3GPP CAMEL / CAP (Customised Applications for Mobile networks) Security Analyzer")
 if not ok or not cap_sec_proto then return end
 

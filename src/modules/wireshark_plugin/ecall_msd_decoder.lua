@@ -10,6 +10,22 @@
 --              UTC Crash Timestamp, Precise WGS84 GPS Latitude/Longitude, Heading/Direction,
 --              Number of Occupants, and Historic Delta Coordinates.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, ecall_msd_proto = pcall(Proto, "ecall_msd", "eCall Minimum Set of Data (MSD) Decoder")
 if not ok or not ecall_msd_proto then return end
 
@@ -125,13 +141,13 @@ local WMI_TABLE = {
 -- Decode Vehicle Propulsion Storage Bitmask
 local function decode_propulsion(mask)
     local types = {}
-    if bit32.band(mask, 0x01) ~= 0 then table.insert(types, "Gasoline / Petrol") end
-    if bit32.band(mask, 0x02) ~= 0 then table.insert(types, "Diesel") end
-    if bit32.band(mask, 0x04) ~= 0 then table.insert(types, "Compressed Natural Gas (CNG)") end
-    if bit32.band(mask, 0x08) ~= 0 then table.insert(types, "Liquid Petroleum Gas (LPG)") end
-    if bit32.band(mask, 0x10) ~= 0 then table.insert(types, "Electric (Battery > 42V)") end
-    if bit32.band(mask, 0x20) ~= 0 then table.insert(types, "Hydrogen Fuel Cell") end
-    if bit32.band(mask, 0x40) ~= 0 then table.insert(types, "Other / Hybrid") end
+    if bit.band(mask, 0x01) ~= 0 then table.insert(types, "Gasoline / Petrol") end
+    if bit.band(mask, 0x02) ~= 0 then table.insert(types, "Diesel") end
+    if bit.band(mask, 0x04) ~= 0 then table.insert(types, "Compressed Natural Gas (CNG)") end
+    if bit.band(mask, 0x08) ~= 0 then table.insert(types, "Liquid Petroleum Gas (LPG)") end
+    if bit.band(mask, 0x10) ~= 0 then table.insert(types, "Electric (Battery > 42V)") end
+    if bit.band(mask, 0x20) ~= 0 then table.insert(types, "Hydrogen Fuel Cell") end
+    if bit.band(mask, 0x40) ~= 0 then table.insert(types, "Other / Hybrid") end
     if #types == 0 then return "Unknown / Not Provided" end
     return table.concat(types, ", ")
 end
@@ -156,9 +172,9 @@ local function base64_decode(data)
         local c2 = b64_chars:find(chars:sub(2,2)) - 1
         local c3 = chars:len() > 2 and (b64_chars:find(chars:sub(3,3)) - 1) or 0
         local c4 = chars:len() > 3 and (b64_chars:find(chars:sub(4,4)) - 1) or 0
-        local b1 = bit32.bor(bit32.lshift(c1, 2), bit32.rshift(c2, 4))
-        local b2 = bit32.bor(bit32.lshift(bit32.band(c2, 0xF), 4), bit32.rshift(c3, 2))
-        local b3 = bit32.bor(bit32.lshift(bit32.band(c3, 0x3), 6), c4)
+        local b1 = bit.bor(bit.lshift(c1, 2), bit.rshift(c2, 4))
+        local b2 = bit.bor(bit.lshift(bit.band(c2, 0xF), 4), bit.rshift(c3, 2))
+        local b3 = bit.bor(bit.lshift(bit.band(c3, 0x3), 6), c4)
         if chars:len() == 2 then return string.char(b1)
         elseif chars:len() == 3 then return string.char(b1, b2)
         else return string.char(b1, b2, b3) end
@@ -186,7 +202,7 @@ function ecall_msd_proto.dissector(tvb, pinfo, tree)
     if working_tvb(0, 1):uint() == 0x30 then
         local seq_len = working_tvb(1, 1):uint()
         if seq_len > 0x80 then
-            local num_len_bytes = bit32.band(seq_len, 0x7F)
+            local num_len_bytes = bit.band(seq_len, 0x7F)
             offset = 2 + num_len_bytes
         else
             offset = 2
@@ -213,10 +229,10 @@ function ecall_msd_proto.dissector(tvb, pinfo, tree)
     local ctrl_byte = working_tvb(offset, 1):uint()
     local ctrl_tree = msd_tree:add(working_tvb(offset, 1), string.format("Control Flags & Vehicle Category (0x%02X)", ctrl_byte))
     
-    local is_auto = bit32.band(ctrl_byte, 0x80) ~= 0
-    local is_test = bit32.band(ctrl_byte, 0x20) ~= 0
-    local is_trusted = bit32.band(ctrl_byte, 0x10) ~= 0
-    local veh_class_id = bit32.band(ctrl_byte, 0x0F)
+    local is_auto = bit.band(ctrl_byte, 0x80) ~= 0
+    local is_test = bit.band(ctrl_byte, 0x20) ~= 0
+    local is_trusted = bit.band(ctrl_byte, 0x10) ~= 0
+    local veh_class_id = bit.band(ctrl_byte, 0x0F)
 
     ctrl_tree:add(f_ctrl_auto, working_tvb(offset, 1))
     ctrl_tree:add(f_ctrl_manual, working_tvb(offset, 1))

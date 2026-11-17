@@ -3,6 +3,26 @@
 --              Detects plain SUPI / IMSI Identity Requests, SUCI de-anonymization bypasses,
 --              malicious De-registration attacks, and forced 5G-to-4G downgrade rejections.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local id_names = { [1]="SUPI (IMSI)", [2]="5G-GUTI", [3]="IMEI", [4]="5G-S-TMSI", [5]="IMEISV", [6]="SUCI" }
+
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, nas_5g_proto = pcall(Proto, "nas_5g_sec", "TelcoSec 5GS NAS (5GMM/5GSM) Security Analyzer")
 if not ok or not nas_5g_proto then return end
 
@@ -113,7 +133,6 @@ function nas_5g_proto.dissector(tvb, pinfo, tree)
         -- Security Heuristic 1: Plain Identity Request probing for SUPI (5G IMSI Catcher / Fake gNB)
         if msg_type == 0x5B and tvb:len() > (msg_offset + 1) then
             local raw_id = bit.band(tvb(msg_offset + 1, 1):uint(), 0x07)
-            local id_names = { [1]="SUPI (IMSI)", [2]="5G-GUTI", [3]="IMEI", [4]="5G-S-TMSI", [5]="IMEISV", [6]="SUCI" }
             local id_str = id_names[raw_id] or string.format("Type %d", raw_id)
             subtree:add(f_id_type, id_str)
 

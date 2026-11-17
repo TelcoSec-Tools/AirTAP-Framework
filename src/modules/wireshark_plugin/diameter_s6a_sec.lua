@@ -3,6 +3,22 @@
 --              Detects 4G EPS Authentication Vector extraction (RAND, AUTN, KASME),
 --              rogue MME Update-Location requests, and malicious Cancel-Location DoS attacks.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, diameter_s6a_proto = pcall(Proto, "diameter_s6a_sec", "TelcoSec Diameter S6a/S6d (HSS-MME) Security Analyzer")
 if not ok or not diameter_s6a_proto then return end
 

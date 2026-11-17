@@ -1,12 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+# setuptools >=77 is required for the PEP 639 string form of `project.license`
+# ("GPL-3.0-only"). Older setuptools accepts only the table form and fails the
+# build with: invalid pyproject.toml config: `project.license`.
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "airtap"
 dynamic = ["version", "readme"]
 description = "AirTap is a cellular radio diagnostics and packet capture framework for 2G/3G/4G/5G basebands"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = "GPL-3.0-only"
 authors = [
     { name = "AirTap Team", email = "contact@telcosec.net" }
@@ -21,7 +24,6 @@ classifiers = [
     "Intended Audience :: Telecommunications Industry",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",

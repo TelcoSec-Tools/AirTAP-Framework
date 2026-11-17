@@ -60,13 +60,17 @@ function shannon_lte_proto.dissector(tvb, pinfo, tree)
         local hex_str = tostring(pdu_tvb:bytes():tohex())
 
         -- Security Heuristics
-        -- 1. Malicious Redirection to 2G (Downgrade Attack)
-        if sig_type == 0 and (string.find(hex_str, "28") or string.find(hex_str, "50")) and pdu_len < 25 then
-            subtree:add(f_sec_alert, "[CRITICAL] Forced GERAN/2G Redirection in RRCConnectionRelease! Suspected False Base Station (FBS).")
-            pinfo.cols.info:append(" [TELCOSEC: FORCED 2G DOWNGRADE]")
-        end
+        -- Inter-RAT 2G redirection detection lives in lte_radio_sec.lua, which
+        -- post-dissects the UPER-decoded lte-rrc.redirectedCarrierInfo field
+        -- produced by the native dissector invoked below. The previous check
+        -- here searched a hex string of the bit-packed ASN.1 PDU for "28"/"50"
+        -- at any offset, which matched ~8-17% of release-sized PDUs by chance
+        -- and raised [CRITICAL] FBS alerts on benign traffic.
 
-        -- 2. IMSI Identity Request Probe in LTE NAS
+        -- 1. IMSI Identity Request Probe in LTE NAS
+        -- Retains a byte-pattern match: at three bytes (NAS EPS Identity
+        -- Request, IMSI) the chance collision rate is negligible, unlike the
+        -- single-byte patterns removed above.
         if sig_type == 1 and string.find(hex_str, "075501") then
             subtree:add(f_sec_alert, "[CRITICAL] Network requesting IMSI via plain Identity Request! 4G IMSI Catcher active.")
             pinfo.cols.info:append(" [TELCOSEC: IMSI HARVEST ATTEMPT]")

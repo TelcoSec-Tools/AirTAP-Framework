@@ -11,6 +11,10 @@ local f_earfcn       = ProtoField.uint32("qc_lte_rrc.earfcn", "EARFCN", base.DEC
 local f_pci          = ProtoField.uint16("qc_lte_rrc.pci", "Physical Cell ID (PCI)", base.DEC)
 local f_pdu_type     = ProtoField.string("qc_lte_rrc.pdu_type", "RRC PDU Type")
 local f_pdu_len      = ProtoField.uint16("qc_lte_rrc.pdu_len", "PDU Length", base.DEC)
+-- Retained and registered although this dissector no longer populates it:
+-- its security findings now come from the lte_radio_sec.lua post-dissector.
+-- Keeping the field registered preserves saved Wireshark display filters and
+-- custom columns that reference qc_lte_rrc.alert.
 local f_sec_alert    = ProtoField.string("qc_lte_rrc.alert", "TelcoSec LTE RAN Alert")
 local f_payload      = ProtoField.bytes("qc_lte_rrc.pdu", "LTE RRC ASN.1 PDU")
 
@@ -79,19 +83,20 @@ function qc_lte_rrc_proto.dissector(tvb, pinfo, tree)
     local pdu_len = tvb:len() - offset
     if pdu_len > 0 then
         local pdu_tvb = tvb(offset, pdu_len):tvb()
-        local hex_str = tostring(pdu_tvb:bytes():tohex())
 
-        -- Security Heuristics
-        -- 1. Malicious Inter-RAT Redirection to 2G GSM (Forced Downgrade)
-        if pdu_type_id == 5 and (string.find(hex_str, "28") or string.find(hex_str, "50")) and pdu_len < 25 then
-            subtree:add(f_sec_alert, "[CRITICAL] RRCConnectionRelease with GERAN/2G Redirection. Suspected IMSI Catcher forcing 4G->2G downgrade!")
-            pinfo.cols.info:append(" [TELCOSEC: FORCED 2G DOWNGRADE]")
-        end
-
-        -- 2. Null Ciphering (EEA0) in SecurityModeCommand
-        if pdu_type_id == 5 and string.find(hex_str, "0000") then
-            subtree:add(f_sec_alert, "[CRITICAL] Potential EEA0 / EIA0 (Null Encryption/Integrity) in LTE SecurityModeCommand!")
-        end
+        -- Security heuristics for inter-RAT redirection and EEA0/EIA0 null
+        -- security deliberately live in lte_radio_sec.lua, which runs as a
+        -- post-dissector over the UPER-decoded lte-rrc.* fields populated by
+        -- the native dissector called below (redirectedCarrierInfo,
+        -- cipheringAlgorithm_r8, integrityProtAlgorithm_r8).
+        --
+        -- Earlier revisions scanned a hex string of this PDU for "28"/"50"
+        -- (redirection) and "0000" (null cipher). That is unsound: the search
+        -- is unanchored, so it matched across byte boundaries at any offset in
+        -- a bit-packed ASN.1 UPER payload with no regard for field position.
+        -- A single-byte pattern hits ~8-17% of RRCConnectionRelease-sized PDUs
+        -- by chance, so benign releases raised [CRITICAL] downgrade alerts.
+        -- Field-based detection is exact; do not reintroduce substring scans.
 
         -- Delegate to native Wireshark dissectors
         if pdu_type_id == 0 and lte_rrc_bcch_bch_dissector then

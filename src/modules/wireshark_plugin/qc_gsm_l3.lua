@@ -3,6 +3,26 @@
 --              Detects 2G IMSI Catcher attacks forcing A5/0 (null cipher) or A5/1 (weak cipher),
 --              fake Location Updating Rejects, and Silent SMS (Type 0) pings.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local chan_names = { [0]="BCCH", [1]="CCCH", [2]="SDCCH", [3]="SACCH", [4]="FACCH" }
+
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, qc_gsm_l3_proto = pcall(Proto, "qc_gsm_l3", "Qualcomm 2G GSM Layer 3 & RR Security Analyzer")
 if not ok or not qc_gsm_l3_proto then return end
 
@@ -68,7 +88,6 @@ function qc_gsm_l3_proto.dissector(tvb, pinfo, tree)
     local arfcn = bit.band(raw_arfcn, 0x3FFF)
     local msg_len = tvb(4, 1):uint()
 
-    local chan_names = { [0]="BCCH", [1]="CCCH", [2]="SDCCH", [3]="SACCH", [4]="FACCH" }
     local chan_str = chan_names[chan_id] or string.format("Chan %d", chan_id)
 
     local subtree = tree:add(qc_gsm_l3_proto, tvb(), string.format("Qualcomm GSM L3 OTA (%s, ARFCN: %d)", chan_str, arfcn))
@@ -111,13 +130,17 @@ function qc_gsm_l3_proto.dissector(tvb, pinfo, tree)
             end
         end
 
-        -- Security Heuristic 2: Silent SMS / Type 0 Ping Detection over SDCCH/SACCH
-        if pd_val == 0x09 and pdu_len > 10 then
-            local hex_pdu = tostring(pdu_tvb:bytes():tohex())
-            if string.find(hex_pdu, "40") or string.find(hex_pdu, "c0") then
-                subtree:add(f_sec_alert, "[WARNING] SMS with Type 0 / Silent SMS TP-PID detected. Suspected covert location tracking ping.")
-            end
-        end
+        -- Security Heuristic 2: Silent SMS / Type 0 ping detection.
+        -- Handled by telcosec_vuln_audit_engine.lua (TELCOSEC-VULN-008), which
+        -- post-dissects the native gsm_sms.tp_pid field and tests it for 0x40
+        -- exactly. TP-PID sits after a variable-length address field, so its
+        -- offset cannot be assumed; the native gsm_a_dtap dissector invoked
+        -- below parses the TPDU and exposes the field.
+        --
+        -- The previous check here searched a hex dump of the whole L3 PDU for
+        -- "40"/"c0" anywhere, unanchored. A single-byte pattern appears in
+        -- roughly one in six arbitrary PDUs by chance, so ordinary SMS traffic
+        -- was reported as covert location tracking.
 
         -- Delegate to native GSM dissectors
         if (chan_id == 0 or chan_id == 1) and gsm_a_ccch_dissector then

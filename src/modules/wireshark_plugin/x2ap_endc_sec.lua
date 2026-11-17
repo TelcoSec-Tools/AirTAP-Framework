@@ -3,6 +3,10 @@
 --              Detects rogue 5G SgNB addition, unencrypted Secondary Cell Group (SCG) bearer establishment,
 --              and 5G NSA session hijacking.
 
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local pdu_types = { [0]="InitiatingMessage", [1]="SuccessfulOutcome", [2]="UnsuccessfulOutcome" }
+
 local ok, x2ap_endc_proto = pcall(Proto, "x2ap_endc_sec", "TelcoSec 5G NSA (EN-DC / X2AP) Security Analyzer")
 if not ok or not x2ap_endc_proto then return end
 
@@ -51,7 +55,6 @@ function x2ap_endc_proto.dissector(tvb, pinfo, tree)
 
     pinfo.cols.protocol = "EN-DC X2AP"
 
-    local pdu_types = { [0]="InitiatingMessage", [1]="SuccessfulOutcome", [2]="UnsuccessfulOutcome" }
     local pdu_type_str = pdu_types[pdu_type_id] or string.format("PDU Type %d", pdu_type_id)
     local proc_name = ENDC_PROC_CODES[proc_code]
 

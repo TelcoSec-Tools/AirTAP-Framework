@@ -2,6 +2,26 @@
 -- Description: Dissects GSM LAPDm frames (3GPP TS 44.006) on SDCCH, SACCH, and FACCH channels.
 --              Detects unauthenticated frame injections, SABM/UA session hijacks, and UI frame tampering.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local s_names = { [0]="RR (Receive Ready)", [1]="RNR (Receive Not Ready)", [2]="REJ (Reject)" }
+
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, gsm_lapdm_proto = pcall(Proto, "gsm_lapdm_sec", "TelcoSec GSM LAPDm Layer 2 Integrity Analyzer")
 if not ok or not gsm_lapdm_proto then return end
 
@@ -64,7 +84,6 @@ function gsm_lapdm_proto.dissector(tvb, pinfo, tree)
     elseif bit.band(ctrl_byte, 0x03) == 1 then
         -- Supervisory frame (S-frame)
         local s_code = bit.rshift(bit.band(ctrl_byte, 0x0C), 2)
-        local s_names = { [0]="RR (Receive Ready)", [1]="RNR (Receive Not Ready)", [2]="REJ (Reject)" }
         frame_type = s_names[s_code] or "S-Frame"
         nr = bit.rshift(bit.band(ctrl_byte, 0xE0), 5)
     elseif bit.band(ctrl_byte, 0x03) == 3 then

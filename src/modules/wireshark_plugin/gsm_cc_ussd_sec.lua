@@ -3,6 +3,22 @@
 --              Detects unauthorized call-forwarding manipulation (*21*...#), premium-rate fraud,
 --              and unsolicited USSD prompts.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, gsm_cc_sec_proto = pcall(Proto, "gsm_cc_sec", "TelcoSec GSM Call Control & USSD Analyzer")
 if not ok or not gsm_cc_sec_proto then return end
 
@@ -59,16 +75,33 @@ function gsm_cc_sec_proto.dissector(tvb, pinfo, tree)
     -- Security Heuristics
     -- 1. Facility / USSD Hijacking / Call Forwarding Injection
     if msg_type == 0x3B or pd == 11 then
-        local hex_str = tostring(tvb:bytes():tohex())
         subtree:add(f_sec_alert, "[WARNING] Supplementary Services / USSD transaction. Verify if call forwarding (*21*, *67*) or SIM balance query was user-initiated.")
         pinfo.cols.info:append(" [USSD / FACILITY TRANSACTION]")
     end
 
-    -- 2. Emergency Setup (Setup with Emergency Service Category)
+    -- 2. Emergency Setup.
+    --
+    -- 3GPP TS 24.008 10.5.4.33: the Emergency Category IE is a TLV with IEI
+    -- 0x2E inside EMERGENCY SETUP / SETUP. Walked to rather than matched as
+    -- the substring "0401" anywhere in the message, which collided with
+    -- ordinary CC information elements.
     if msg_type == 0x05 and tvb:len() >= 4 then
-        local hex_str = tostring(tvb:bytes():tohex())
-        if string.find(hex_str, "0401") then
-            subtree:add(f_sec_alert, "[INFO] Emergency Call Setup (112 / 911).")
+        local offset = 2        -- octets 0..1 are PD/TI and message type
+        local limit = tvb:len()
+        local guard = 0
+
+        while offset + 1 < limit and guard < 32 do
+            guard = guard + 1
+            local iei = tvb(offset, 1):uint()
+            local ie_len = tvb(offset + 1, 1):uint()
+            if offset + 2 + ie_len > limit then break end
+
+            if iei == 0x2E then
+                subtree:add(f_sec_alert, "[INFO] Emergency Call Setup (112 / 911).")
+                break
+            end
+
+            offset = offset + 2 + ie_len
         end
     end
 

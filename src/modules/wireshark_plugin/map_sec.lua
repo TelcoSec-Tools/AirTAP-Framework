@@ -5,6 +5,22 @@
 --              USSD & Supplementary Services (USSR, USSN), and Location Services (PSI, ATI, SLR).
 --              Enforces GSMA FS.11 / FS.19 / FS.20 / FS.21 SS7 Interconnect Firewall & Threat Hunting Rules.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, map_sec_proto = pcall(Proto, "map_sec", "TelcoSec SS7 MAP (Mobile Application Part) Security Analyzer")
 if not ok or not map_sec_proto then return end
 
@@ -132,7 +148,6 @@ function map_sec_proto.dissector(tvb, pinfo, tree)
 
     -- Scan for IMSI / MSISDN in payload (TBCD encoded)
     if len > 3 then
-        local raw_hex = tvb:bytes():tohex()
         -- Tag 0x04 or 0x80 (IMSI Octet String in MAP)
         for off = 1, len - 8 do
             local tag = tvb(off, 1):uint()

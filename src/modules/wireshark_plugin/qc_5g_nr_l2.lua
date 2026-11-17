@@ -3,6 +3,26 @@
 --              Analyzes User Plane ciphering status (NEA0 vs NEA2), PDCP sequence number tampering,
 --              and MAC RACH/BSR spoofing.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+-- Constant lookup tables, hoisted to module scope: building these
+-- per packet allocated a short-lived table on every dissect call.
+local layer_names = { [1] = "NR-PDCP", [2] = "NR-RLC", [3] = "NR-MAC", [4] = "NR-SDAP" }
+
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, qc_5g_l2_proto = pcall(Proto, "qc_5g_l2", "Qualcomm 5G NR Layer 2 (SDAP/PDCP/RLC/MAC) Analyzer")
 if not ok or not qc_5g_l2_proto then return end
 
@@ -53,7 +73,6 @@ function qc_5g_l2_proto.dissector(tvb, pinfo, tree)
     local dir_str = (direction == 0) and "UL" or "DL"
     local sn = tvb(4, 4):le_uint()
 
-    local layer_names = { [1] = "NR-PDCP", [2] = "NR-RLC", [3] = "NR-MAC", [4] = "NR-SDAP" }
     local layer_str = layer_names[layer_id] or string.format("L2 Layer %d", layer_id)
     local rb_type_str = (rb_id < 3) and string.format("SRB%d", rb_id) or string.format("DRB%d (User Plane)", rb_id - 2)
 

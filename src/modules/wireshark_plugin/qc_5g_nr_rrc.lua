@@ -14,6 +14,10 @@ local f_pdu_type       = ProtoField.string("qc_nr_rrc.pdu_type", "RRC PDU Type")
 local f_pdu_len        = ProtoField.uint16("qc_nr_rrc.pdu_len", "RRC PDU Length", base.DEC)
 local f_cipher_algo    = ProtoField.string("qc_nr_rrc.cipher_algo", "NR Ciphering Algorithm (NEA)")
 local f_integrity_algo = ProtoField.string("qc_nr_rrc.integrity_algo", "NR Integrity Algorithm (NIA)")
+-- Retained and registered although the main dissector no longer populates it:
+-- findings now come from the telcosec_nr_rrc_post post-dissector below and
+-- from nr_radio_sec.lua. Keeping the field registered preserves saved
+-- Wireshark display filters and columns referencing qc_nr_rrc.security_alert.
 local f_sec_alert      = ProtoField.string("qc_nr_rrc.security_alert", "TelcoSec 5G RAN Alert")
 local f_rrc_pdu        = ProtoField.bytes("qc_nr_rrc.pdu", "NR RRC ASN.1 PDU")
 
@@ -93,20 +97,19 @@ function qc_nr_rrc_proto.dissector(tvb, pinfo, tree)
 
     if actual_pdu_len > 0 then
         local pdu_tvb = tvb(pdu_offset, actual_pdu_len):tvb()
-        local raw_bytes_str = tostring(pdu_tvb:bytes():tohex())
 
-        -- Security Analysis Heuristics
-        -- 1. SecurityModeCommand with NIA0 / NEA0 (Null Integrity / Ciphering)
-        if pdu_type_id == 3 and string.find(raw_bytes_str, "0000") then
-            -- Heuristic check for unencrypted or null integrity setup
-            subtree:add(f_sec_alert, "[CRITICAL] Potential Null-Ciphering / Null-Integrity (NIA0/NEA0) or unverified 5G Security Mode Command.")
-            pinfo.cols.info:append(" [TELCOSEC: NIA0/NEA0 WARNING]")
-        end
-
-        -- 2. Forced Redirection Detection (RRCRelease redirecting to 4G/2G)
-        if pdu_type_id == 3 and (string.find(raw_bytes_str, "40") or string.find(raw_bytes_str, "80")) and actual_pdu_len < 30 then
-            subtree:add(f_sec_alert, "[WARNING] RRCRelease with potential Inter-RAT Cell Redirection. Check for 5G-to-4G/2G downgrade attack.")
-        end
+        -- Security analysis for NEA0/NIA0 null security and inter-RAT
+        -- redirection is performed on UPER-decoded fields rather than on raw
+        -- bytes: the telcosec_nr_rrc_post post-dissector at the foot of this
+        -- file reads nr-rrc.cipheringAlgorithm / nr-rrc.integrityProtAlgorithm,
+        -- and nr_radio_sec.lua reads nr-rrc.redirectedCarrierInfo. Both are
+        -- populated by the native dissectors invoked below.
+        --
+        -- Previous revisions searched a hex string of this PDU for "0000",
+        -- "40" and "80". Those searches were unanchored and position-blind
+        -- against a bit-packed ASN.1 payload; a single-byte pattern matches
+        -- ~14% of arbitrary PDUs, so benign RRCRelease frames produced
+        -- redirection warnings. Do not reintroduce substring scans here.
 
         -- Delegate to native Wireshark NR RRC dissectors if available
         if pdu_type_id == 0 and nr_rrc_bcch_bch_dissector then

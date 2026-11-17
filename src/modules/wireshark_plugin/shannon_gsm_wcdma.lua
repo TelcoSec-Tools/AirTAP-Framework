@@ -3,6 +3,22 @@
 --              Detects 2G IMSI Catcher attacks forcing A5/0 (no ciphering) or A5/1 (weak cipher)
 --              and 3G UEA0 null-cipher configurations.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, shannon_legacy_proto = pcall(Proto, "shannon_legacy", "Samsung Shannon 2G/3G Legacy Cellular Analyzer")
 if not ok or not shannon_legacy_proto then return end
 
@@ -49,22 +65,43 @@ function shannon_legacy_proto.dissector(tvb, pinfo, tree)
 
     if pdu_len > 0 then
         local pdu_tvb = tvb(offset, pdu_len):tvb()
-        local hex_str = tostring(pdu_tvb:bytes():tohex())
 
-        -- Security Heuristic 1: GSM Ciphering Mode Command A5/0 (No Encryption)
-        if rat_id == 0 and string.find(hex_str, "0635") then
-            if string.find(hex_str, "063500") or string.find(hex_str, "063501") then
-                subtree:add(f_cipher_algo, "A5/0 (No Encryption)")
-                subtree:add(f_sec_alert, "[CRITICAL] Network forced A5/0 (Plaintext) on Exynos modem! 2G IMSI Catcher active.")
-                pinfo.cols.info:append(" [TELCOSEC: A5/0 NULL CIPHER]")
+        -- Security Heuristic 1: GSM Ciphering Mode Command with A5/0.
+        --
+        -- 3GPP TS 44.018 9.1.9 / 10.5.2.9: the message is PD 0x06 (Radio
+        -- Resources) with message type 0x35, and the Cipher Mode Setting IE
+        -- sits in octet 3. Bit 0 is SC (0 = no ciphering) and bits 3..1 are
+        -- the algorithm. Read at that offset rather than matched as the
+        -- substring "063500"/"063501" anywhere in the frame.
+        if rat_id == 0 and pdu_len >= 3 then
+            local pd = bit.band(pdu_tvb(0, 1):uint(), 0x0F)
+            local msg_type = pdu_tvb(1, 1):uint()
+            if pd == 0x06 and msg_type == 0x35 then
+                local setting = pdu_tvb(2, 1):uint()
+                local start_ciph = bit.band(setting, 0x01)
+                local algo = bit.rshift(bit.band(setting, 0x0E), 1)
+
+                if start_ciph == 0 or algo == 0 then
+                    subtree:add(f_cipher_algo, "A5/0 (No Encryption)")
+                    subtree:add(f_sec_alert, "[CRITICAL] Network commanded A5/0 (Plaintext) on Exynos modem! 2G IMSI Catcher active.")
+                    pinfo.cols.info:append(" [TELCOSEC: A5/0 NULL CIPHER]")
+                elseif algo == 1 then
+                    subtree:add(f_cipher_algo, "A5/1 (Weak / Broken Cipher)")
+                    subtree:add(f_sec_alert, "[WARNING] A5/1 negotiated. Vulnerable to real-time cracking.")
+                else
+                    subtree:add(f_cipher_algo, string.format("A5/%d", algo))
+                end
             end
         end
 
-        -- Security Heuristic 2: UMTS Security Mode Command with UEA0
-        if rat_id == 1 and string.find(hex_str, "0000") and pdu_len < 25 then
-            subtree:add(f_cipher_algo, "UEA0 (Null Encryption)")
-            subtree:add(f_sec_alert, "[CRITICAL] UMTS Bearer negotiated UEA0 (No Ciphering)!")
-        end
+        -- Security Heuristic 2: UMTS Security Mode Command with UEA0.
+        --
+        -- Handled by qc_wcdma_rrc.lua, which reads the UPER-decoded
+        -- rrc.cipheringAlgorithm field from the native RRC dissector invoked
+        -- below. The previous check here searched this PDU for the substring
+        -- "0000" at any nibble offset in a bit-packed ASN.1 payload, so an
+        -- ordinary Security Mode Command raised a [CRITICAL] null-cipher
+        -- alert. Do not reintroduce a substring scan here.
 
         if rat_id == 0 and gsm_a_dtap_dissector then
             gsm_a_dtap_dissector:call(pdu_tvb, pinfo, tree)

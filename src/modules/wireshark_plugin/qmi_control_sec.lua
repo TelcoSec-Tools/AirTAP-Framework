@@ -6,6 +6,22 @@
 --              Detects hardware IMEI rewrite attacks, direct smart card APDU execution, rogue APN profile injection,
 --              SIM network lock bypasses (Depersonalization), and stealth call/SMS initiation.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, qmi_sec_proto = pcall(Proto, "qmi_control_sec", "TelcoSec Qualcomm QMI Control Message Security Analyzer")
 if not ok or not qmi_sec_proto then return end
 

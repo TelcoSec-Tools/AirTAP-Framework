@@ -1,12 +1,15 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+# setuptools >=77 is required for the PEP 639 string form of `project.license`
+# ("GPL-3.0-only"). Older setuptools accepts only the table form and fails the
+# build with: invalid pyproject.toml config: `project.license`.
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "airtap"
 dynamic = ["version", "readme"]
 description = "AirTap is a cellular radio diagnostics and packet capture framework for 2G/3G/4G/5G basebands"
-requires-python = ">=3.6"
+requires-python = ">=3.9"
 license = "GPL-3.0-only"
 authors = [
     { name = "AirTap Team", email = "contact@telcosec.net" }
@@ -21,9 +24,6 @@ classifiers = [
     "Intended Audience :: Telecommunications Industry",
     "Intended Audience :: Science/Research",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.6",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -54,11 +54,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/AirTAP-Framework/AirTAP-Framework"
-Documentation = "https://github.com/AirTAP-Framework/AirTAP-Framework#readme"
-Repository = "https://github.com/AirTAP-Framework/AirTAP-Framework.git"
-"Issue Tracker" = "https://github.com/AirTAP-Framework/AirTAP-Framework/issues"
-Changelog = "https://github.com/AirTAP-Framework/AirTAP-Framework/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/TelcoSec-Tools/AirTAP-Framework"
+Documentation = "https://github.com/TelcoSec-Tools/AirTAP-Framework#readme"
+Repository = "https://github.com/TelcoSec-Tools/AirTAP-Framework.git"
+"Issue Tracker" = "https://github.com/TelcoSec-Tools/AirTAP-Framework/issues"
+Changelog = "https://github.com/TelcoSec-Tools/AirTAP-Framework/blob/master/CHANGELOG.md"
 
 [project.scripts]
 airtap = "airtap.main:main"
@@ -70,8 +70,21 @@ readme = { file = "README.md", content-type = "text/markdown" }
 [tool.setuptools.package-dir]
 airtap = "src"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# Packages are listed explicitly rather than auto-discovered. A
+# `packages.find` with `where = ["src"]` overrides the package-dir mapping
+# above and installs src/'s subdirectories as the top-level names `inputs`,
+# `modules` and `protocol`: `import airtap` then fails, the console script
+# dies with ModuleNotFoundError, and three generic names are squatted in
+# every environment the wheel touches.
+[tool.setuptools]
+packages = [
+    "airtap",
+    "airtap.inputs",
+    "airtap.protocol",
+    "airtap.modules",
+    "airtap.modules.efs_shell_commands",
+    "airtap.modules.wireshark_plugin",
+]
 
 [tool.setuptools.package-data]
 airtap = [

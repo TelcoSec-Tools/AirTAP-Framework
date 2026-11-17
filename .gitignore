@@ -17,7 +17,7 @@ __pycache__/
 *.bin
 *.out
 *.app
-
+docs/superpowers/*
 # ------------------------------------------------------------------------------
 # 2. Distribution, Packaging & Build Artifacts
 # ------------------------------------------------------------------------------
@@ -210,3 +210,4 @@ nv_backup/
 # Keep test fixtures and GUI static assets
 !tests/fixtures/*
 !src/modules/gui_assets/*
+CLAUDE.md

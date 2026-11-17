@@ -58,7 +58,7 @@ All 113+ unit tests must pass cleanly before submitting a pull request.
 
 ## Coding Standards & Conventions
 
-- **Python Version Compatibility**: AirTap supports Python 3.6+ through Python 3.13. Avoid using features exclusive to newer Python versions without backwards-compatible fallbacks.
+- **Python Version Compatibility**: AirTap supports Python 3.9 through Python 3.13 (the versions exercised by CI). Avoid using features exclusive to newer Python versions without backwards-compatible fallbacks.
 - **Lazy Logging**: For high-throughput capture paths (such as `_base_input.py` and `usb_modem_pyserial.py`), defer byte-formatting and debug string construction to avoid CPU overhead when debug mode is disabled.
 - **Error Robustness**: Modem serial streams can deliver partial, corrupt, or interleaved frames. Parsers should gracefully handle truncated data without crashing the main capture loop.
 - **No Mockup Code**: Do not commit placeholder or stub code. All features should be fully functional with accompanying unit tests.

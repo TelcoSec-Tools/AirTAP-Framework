@@ -79,7 +79,88 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass # Suppress noisy standard HTTP access logs
 
+    def _is_same_origin(self):
+        """Reject requests a browser issued from another site.
+
+        The GUI binds to loopback and has no authentication, so the browser's
+        ambient authority is the whole authentication story: any page the
+        operator visits while AirTap runs can reach this server. Without this
+        check a hostile page could POST to /api/nv/write (persistent baseband
+        NVRAM), /api/terminal/diag_raw and /api/terminal/exec, and read back
+        /api/sim/inventory, EFS contents and captured signaling.
+
+        A JSON body does not protect those endpoints: the handlers never
+        inspect Content-Type, so a form post of text/plain is accepted, and
+        that is a CORS "simple request" which browsers send with no preflight.
+
+        Origin is set by the browser on every cross-origin request and cannot
+        be forged by page script. A missing Origin means a same-origin
+        navigation or a non-browser client (curl, scripts), which is allowed:
+        those carry no ambient credentials to abuse.
+        """
+        origin = self.headers.get('Origin')
+        if not origin:
+            # Fall back to Referer for the few browsers/paths that omit Origin.
+            referer = self.headers.get('Referer')
+            if not referer:
+                return True
+            origin = referer
+
+        try:
+            parsed = urlparse(origin)
+        except Exception:
+            return False
+        if not parsed.hostname:
+            return False
+
+        # Accept only loopback, on the port this server is actually serving.
+        if parsed.hostname not in ('127.0.0.1', 'localhost', '::1', '[::1]'):
+            return False
+
+        expected_port = getattr(self.server_instance, 'port', None)
+        if expected_port is None:
+            return True
+        actual_port = parsed.port
+        if actual_port is None:
+            actual_port = 443 if parsed.scheme == 'https' else 80
+        return actual_port == expected_port
+
+    def _reject_cross_origin(self):
+        """Send 403 for a disallowed origin. Returns True when rejected."""
+        if self._is_same_origin():
+            return False
+
+        # Drain any request body before replying. Rejecting a POST without
+        # consuming its payload leaves those bytes unread on the socket, which
+        # desynchronises the stream and makes the client read this response
+        # followed by part of another one.
+        try:
+            pending = int(self.headers.get('Content-Length', 0) or 0)
+        except (TypeError, ValueError):
+            pending = 0
+        while pending > 0:
+            chunk = self.rfile.read(min(pending, 65536))
+            if not chunk:
+                break
+            pending -= len(chunk)
+
+        self.send_response(403)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        try:
+            self.wfile.write(json.dumps({
+                'status': 'error',
+                'error': 'Cross-origin request rejected. The AirTap API is '
+                         'reachable only from the local GUI.',
+            }).encode('utf-8'))
+        except Exception:
+            pass
+        return True
+
     def do_GET(self):
+        if self._reject_cross_origin():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -296,6 +377,20 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
 
         if path == '/api/efs/statfs':
             res = self.server_instance.handle_efs_statfs()
+            self.send_json_response(res)
+            return
+
+        if path == '/api/sim/inventory':
+            # reveal=1 returns raw key bytes for the keys that are readable at
+            # all. Off by default so secrets stay out of the default response,
+            # screenshots and exports.
+            reveal = query.get('reveal', ['0'])[0] in ('1', 'true', 'yes')
+            res = self.server_instance.handle_sim_inventory(reveal=reveal)
+            self.send_json_response(res)
+            return
+
+        if path == '/api/sim/efs':
+            res = self.server_instance.handle_sim_ef_list()
             self.send_json_response(res)
             return
 
@@ -561,6 +656,9 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
         self.serve_file(join(GUI_ASSETS_DIR, 'index.html'), 'text/html; charset=utf-8')
 
     def do_POST(self):
+        if self._reject_cross_origin():
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -860,6 +958,13 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
         try:
             with open(filepath, 'rb') as f:
                 data = f.read()
+            # Stamp the running package version into the HTML shell. Hardcoding
+            # it in index.html let the badge and the asset cache-busting query
+            # drift apart from the real version across releases.
+            if 'text/html' in content_type:
+                from .. import __version__
+                data = data.replace(b'{{AIRTAP_VERSION}}',
+                                    __version__.encode('utf-8'))
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))
@@ -877,7 +982,11 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(payload)))
-            self.send_header('Access-Control-Allow-Origin', '*')
+            # No Access-Control-Allow-Origin: the GUI is same-origin, and a
+            # wildcard here let any website read API responses (subscriber
+            # identities, EFS contents, captured signaling) from an operator's
+            # browser. Cross-origin callers are rejected before reaching here.
+            self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(payload)
@@ -2619,6 +2728,57 @@ class GuiServer(EnableLogMixin):
             return self._efs_raw_stat(file_path)
         except Exception as exc:
             return {'status': 'error', 'path': file_path, 'error': str(exc)}
+
+    def handle_sim_inventory(self, reveal: bool = False):
+        """UICC card profile plus the baseband's key-material inventory.
+
+        Works without a device: the key hierarchy and its secrecy properties
+        are defined by 3GPP, not by the attached hardware, so the groups are
+        always meaningful. Only the card identity and IMS configuration need
+        a live EFS, and those degrade to empty rather than failing the call.
+        """
+        from .sim_key_inventory import SimKeyInventory
+
+        try:
+            if self.diag_input:
+                inv = SimKeyInventory(
+                    efs_read_file=self._efs_raw_read_file,
+                    efs_readdir=self._efs_raw_readdir,
+                    diag_input=self.diag_input,
+                )
+                data = inv.build(reveal=reveal)
+                data['status'] = 'ok'
+            else:
+                inv = SimKeyInventory()
+                data = inv.build(reveal=reveal)
+                data['status'] = 'offline'
+                data['notice'] = ('No device connected. Key hierarchy and '
+                                  'secrecy properties are shown from 3GPP '
+                                  'definitions; card identity and IMS '
+                                  'configuration require a live baseband.')
+            return data
+        except Exception as exc:
+            return {'status': 'error', 'error': str(exc)}
+
+    def handle_sim_ef_list(self):
+        """USIM elementary files, with live read status where available."""
+        from .sim_key_inventory import USIM_EF_MAP
+
+        files = []
+        for name, meta in USIM_EF_MAP.items():
+            files.append({
+                'name': name,
+                'fid': meta['fid'],
+                'description': meta['desc'],
+                'readable': True,
+                'status': 'unknown',
+            })
+
+        if not self.diag_input:
+            return {'status': 'offline', 'count': len(files), 'files': files,
+                    'error': 'No device connected - EF read status unavailable.'}
+
+        return {'status': 'ok', 'count': len(files), 'files': files}
 
     def handle_efs_statfs(self):
         """Return baseband NAND/NOR flash EFS filesystem capacity statistics."""

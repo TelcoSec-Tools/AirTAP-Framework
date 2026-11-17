@@ -1,7 +1,7 @@
 # AirTap: Cellular Radio Diagnostics & Security Framework
 
-[![CI](https://github.com/AirTAP-Framework/AirTAP-Framework/actions/workflows/ci.yml/badge.svg)](https://github.com/AirTAP-Framework/AirTAP-Framework/actions/workflows/ci.yml)
-[![Python Version](https://img.shields.io/badge/python-3.6%20%7C%203.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![CI](https://github.com/TelcoSec-Tools/AirTAP-Framework/actions/workflows/ci.yml/badge.svg)](https://github.com/TelcoSec-Tools/AirTAP-Framework/actions/workflows/ci.yml)
+[![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-green.svg)](LICENSE)
 [![Wireshark: Supported](https://img.shields.io/badge/Wireshark-GSMTAP%20v2%20%2B%20Lua-blueviolet.svg)](https://www.wireshark.org/)
 [![Standards](https://img.shields.io/badge/3GPP-2G%20%7C%203G%20%7C%204G%20%7C%205G%20NR%20%7C%20IMS-orange.svg)](https://www.3gpp.org/)
@@ -143,7 +143,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/AirTAP-Framework/AirTAP-Framework.git
+git clone https://github.com/TelcoSec-Tools/AirTAP-Framework.git
 cd AirTAP-Framework
 
 # 2. (Optional) Create virtual environment
@@ -433,6 +433,12 @@ We welcome contributions from the telecommunications and cybersecurity community
 ## Responsible Use & Security
 
 AirTap is designed for research, educational purposes, network auditing, and authorized telecommunications diagnostics. Capturing radio signaling may expose sensitive subscriber identifiers (IMSI, IMEI) and location information. Use AirTap only on networks and devices you own or are explicitly authorized to test.
+
+### Do not expose the Web GUI to a network
+
+The Visual Operations Suite (`--gui`) binds to `127.0.0.1` and **has no authentication**. That is deliberate: it is a local operator console, not a multi-user service. Its API can write persistent baseband NVRAM (`/api/nv/write`), execute AT and raw Diag commands (`/api/terminal/exec`, `/api/terminal/diag_raw`), read the modem filesystem, and stream live captured signaling.
+
+Anyone who can reach the port has all of that, unauthenticated. Do not bind it to `0.0.0.0`, forward the port, or place it behind a reverse proxy without adding your own authentication and TLS in front. Requests from other web origins are rejected, so a page you visit while AirTap is running cannot drive the API, but that guard does not substitute for network isolation.
 
 For vulnerability disclosure guidelines, please read our [Security Policy](SECURITY.md).
 

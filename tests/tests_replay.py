@@ -72,6 +72,30 @@ class TestSessionReplay(unittest.TestCase):
         self.assertEqual(status['total_frames'], 5)
         self.assertEqual(status['speed'], 5.0)
 
+    def test_read_loop_dispatches_all_frames_and_returns(self):
+        # Regression: `airtap -r FILE` died with
+        # "'SessionReplayer' object has no attribute 'read_loop'".
+        # read_loop() must start playback itself (load() leaves the replayer
+        # PAUSED) and block until every frame has been dispatched.
+        dispatched = []
+        class MockModule:
+            def on_log(self, log_type, payload, hdr, ts):
+                dispatched.append(log_type)
+
+        replayer = SessionReplayer(raw_bytes=bytes(self.pcap_bytes))
+        replayer.add_module(MockModule())
+        replayer.set_speed(0)  # unthrottled, keep the test fast
+
+        replayer.read_loop()
+
+        self.assertEqual(len(dispatched), 5)
+        self.assertEqual(replayer.state, SessionReplayer.STATE_COMPLETED)
+
+    def test_read_loop_on_empty_capture_returns_immediately(self):
+        replayer = SessionReplayer(raw_bytes=b'')
+        replayer.read_loop()  # must not raise or hang
+        self.assertEqual(replayer.frames, [])
+
 
 if __name__ == '__main__':
     unittest.main()

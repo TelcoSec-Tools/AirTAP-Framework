@@ -32,9 +32,10 @@ services:
   # Full hardware access: raw USB DIAG + adb. This is the normal way to run.
   #
   # privileged + the /dev/bus/usb mount is what lets pyusb claim the DIAG
-  # interface directly. It is broad on purpose: a DIAG endpoint is not
-  # reachable through a narrower device cgroup rule once the kernel rebinds
-  # the interface mid-session, which basebands do when switching composition.
+  # interface directly. It is the safe default because it does not depend on
+  # which device nodes a baseband creates when it re-enumerates mid-session
+  # (basebands change USB composition). See `airtap-scoped` below for a
+  # narrower, untested alternative.
   # ---------------------------------------------------------------------------
   airtap:
     <<: *airtap-base
@@ -47,6 +48,33 @@ services:
     # Lets the container see host USB hotplug events as the device re-enumerates.
     network_mode: host
     pid: host
+
+  # ---------------------------------------------------------------------------
+  # Narrower alternative to `privileged: true` for shared hosts.
+  #
+  # Instead of every capability and every device, allow only the USB device
+  # classes a baseband uses: major 189 (raw USB bus nodes, pyusb), 188
+  # (ttyUSB*) and 166 (ttyACM*). Rules apply to nodes created later, so a
+  # device that re-enumerates under a new minor when it switches USB
+  # composition should stay reachable.
+  #
+  # UNTESTED against real hardware: this was written on a host with no USB
+  # passthrough. If DIAG claim fails here (usb.core.USBError: Access denied /
+  # Operation not permitted), fall back to the privileged `airtap` service.
+  # ---------------------------------------------------------------------------
+  airtap-scoped:
+    <<: *airtap-base
+    container_name: airtap-scoped
+    cap_add:
+      - SYS_RAWIO
+    device_cgroup_rules:
+      - "c 189:* rmw"
+      - "c 188:* rmw"
+      - "c 166:* rmw"
+    volumes:
+      - ./captures:/captures
+      - /run/udev:/run/udev:ro
+      - /dev/bus/usb:/dev/bus/usb
 
   # ---------------------------------------------------------------------------
   # Same, plus the Visual Operations Suite published on :5000.

@@ -386,6 +386,29 @@ class SessionReplayer(BaseInput):
             'file_name': os.path.basename(self.file_path) if self.file_path else 'Memory Capture',
         }
 
+    # ─── BaseInput Integration (CLI: airtap -r FILE) ─────────────────────────
+
+    def read_loop(self):
+        """
+        Entry point used by BaseInput._read_thread() when the replayer is the
+        CLI input source. The GUI drives play()/pause() itself and never goes
+        through here.
+
+        load() leaves the replayer PAUSED, so start playback explicitly, then
+        block until the worker finishes (or stop() is called). Returning early
+        would end BaseInput.run() and tear the modules down before any frame
+        was dispatched.
+        """
+        if not self.frames and not self.load():
+            return
+
+        if not self.play():
+            return
+
+        worker = self._worker_thread
+        while worker is not None and worker.is_alive() and not self._stop_event.is_set():
+            worker.join(0.2)
+
     # ─── Internal Worker Loop ────────────────────────────────────────────────
 
     def _run_replay(self):

@@ -1,5 +1,7 @@
 #!/usr/bin/python3
 
+import sys
+
 from .main import main
 
-main()
+sys.exit(main())

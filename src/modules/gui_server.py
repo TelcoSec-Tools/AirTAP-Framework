@@ -129,6 +129,21 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
         """Send 403 for a disallowed origin. Returns True when rejected."""
         if self._is_same_origin():
             return False
+
+        # Drain any request body before replying. Rejecting a POST without
+        # consuming its payload leaves those bytes unread on the socket, which
+        # desynchronises the stream and makes the client read this response
+        # followed by part of another one.
+        try:
+            pending = int(self.headers.get('Content-Length', 0) or 0)
+        except (TypeError, ValueError):
+            pending = 0
+        while pending > 0:
+            chunk = self.rfile.read(min(pending, 65536))
+            if not chunk:
+                break
+            pending -= len(chunk)
+
         self.send_response(403)
         self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Connection', 'close')

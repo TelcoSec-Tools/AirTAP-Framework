@@ -39,14 +39,25 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
         include:
+          # The oldest supported Python is pinned to runners that still ship it
+          # natively, so the floor stays genuinely tested rather than silently
+          # unverified.
+          #
           # ubuntu-latest tracks Ubuntu 26.04, whose actions/python-versions
-          # manifest no longer carries 3.9. Pin the oldest supported version to
-          # a runner that still provides it, so the floor stays tested rather
-          # than silently unverified.
+          # manifest no longer carries 3.9 at all — the job fails at setup.
           - os: ubuntu-22.04
+            python-version: '3.9'
+          # macos-latest no longer provisions 3.9 either, so setup-python has to
+          # download and build it. Under runner contention that job was reaching
+          # ~16 minutes queued without executing a single step and being
+          # cancelled, which marked the whole run failed despite every other job
+          # passing. macos-13 still carries 3.9 in the image.
+          - os: macos-13
             python-version: '3.9'
         exclude:
           - os: ubuntu-latest
+            python-version: '3.9'
+          - os: macos-latest
             python-version: '3.9'
 
     steps:

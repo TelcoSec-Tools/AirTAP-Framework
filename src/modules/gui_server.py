@@ -874,6 +874,13 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
         try:
             with open(filepath, 'rb') as f:
                 data = f.read()
+            # Stamp the running package version into the HTML shell. Hardcoding
+            # it in index.html let the badge and the asset cache-busting query
+            # drift apart from the real version across releases.
+            if 'text/html' in content_type:
+                from .. import __version__
+                data = data.replace(b'{{AIRTAP_VERSION}}',
+                                    __version__.encode('utf-8'))
             self.send_response(200)
             self.send_header('Content-Type', content_type)
             self.send_header('Content-Length', str(len(data)))

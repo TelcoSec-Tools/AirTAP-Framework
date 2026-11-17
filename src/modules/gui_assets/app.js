@@ -1542,7 +1542,11 @@ function switchTab(tabId, pushHistory = true) {
         rebuildF3Terminal();
     }
     if (tabId === 'tab-device') {
-        fetchDeviceDossier();
+        // Refresh the dossier on tab entry. The tab's controls are bound once
+        // at startup by initDevicePage(); loadDeviceStatus() re-fetches
+        // /api/device/info and feeds updateDeviceInfo(), which fills the
+        // dossier-* fields.
+        loadDeviceStatus();
     }
     if (tabId === 'tab-fuzzer') {
         updateFuzzerHud(state.fuzzer.total || 0, state.fuzzer.anomalies || 0);
@@ -4020,6 +4024,12 @@ function applyIpGeoFix(data) {
     }
 }
 
+// Backoff window applied after the IP-geolocation service rate-limits us.
+// Without this, every caller that misses the success cache re-requests a
+// known-throttled endpoint, turning one 429 into a console full of them.
+const IP_GEO_BACKOFF_MS = 15 * 60 * 1000;
+let ipGeoInFlight = null;
+
 function fallbackIpGeolocation(msg) {
     if (msg) showToast(msg, 'warn');
     // 1. Check local session cache to prevent 429 rate limit
@@ -4034,9 +4044,28 @@ function fallbackIpGeolocation(msg) {
         }
     } catch(e) {}
 
-    // 2. Fetch from service with silent rate-limit handling
-    fetch('https://ipwho.is/')
+    // 2. Respect a previous rate-limit response before asking again.
+    try {
+        const until = parseInt(sessionStorage.getItem('airtap_geo_backoff') || '0', 10);
+        if (until && Date.now() < until) return;
+    } catch(e) {}
+
+    // 3. Coalesce concurrent callers onto a single request. Three code paths
+    // can call this (no geolocation support, position error, permission
+    // denied), and they may fire together on load.
+    if (ipGeoInFlight) return;
+
+    // 4. Fetch from service with silent rate-limit handling.
+    ipGeoInFlight = fetch('https://ipwho.is/')
         .then(r => {
+            if (r.status === 429 || r.status === 403) {
+                // Remember the throttle so we stop hammering the endpoint.
+                try {
+                    sessionStorage.setItem('airtap_geo_backoff',
+                        String(Date.now() + IP_GEO_BACKOFF_MS));
+                } catch(e) {}
+                return null;
+            }
             if (!r.ok) return null;
             return r.json();
         })
@@ -4046,7 +4075,8 @@ function fallbackIpGeolocation(msg) {
                 applyIpGeoFix(data);
             }
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => { ipGeoInFlight = null; });
 }
 
 function applyCustomLocation(lat, lng, label = 'Custom Fix') {

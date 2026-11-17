@@ -221,6 +221,25 @@ Use '--help-advanced' to display all expert, forensic, and low-level protocol op
     return parser
 
 
+PCAP_MAGICS = (b'\xd4\xc3\xb2\xa1', b'\xa1\xb2\xc3\xd4', b'\x4d\x3c\xb2\xa1', b'\xa1\xb2\x3c\x4d')
+
+def _input_is_pcap(args):
+    """True when the selected input is a PCAP: --pcap-read always, and -r/--replay
+    only when the file's magic bytes are a PCAP (DLF/QMDL/JSON replays are
+    Qualcomm-framed and can legitimately be re-dumped)."""
+    if getattr(args, 'pcap_read', None):
+        return True
+    replay = getattr(args, 'replay', None)
+    if replay:
+        try:
+            pos = replay.tell()
+            magic = replay.read(4)
+            replay.seek(pos)
+        except (OSError, ValueError):
+            return False
+        return magic in PCAP_MAGICS
+    return False
+
 def print_application_banner():
     banner = (
         "\033[1;36m    _    _     _____            \033[0m\n"
@@ -352,6 +371,16 @@ def main():
         if usb_modem.chardev_if_mounted:
             return UsbModemPyserialConnector(usb_modem.chardev_if_mounted)
         return UsbModemPyusbConnector(usb_modem)
+
+    # A GSMTAP pcap carries bare protocol PDUs, while PcapDumper parses the
+    # Qualcomm-framed logs a DIAG device (or a DLF/QMDL capture) produces.
+    # Re-dumping a pcap therefore silently drops most frames (measured: 250 of
+    # 2040 on the bundled sample). Refuse it instead of writing a truncated file.
+    if args.pcap_dump and _input_is_pcap(args):
+        error('The input is already a PCAP, and re-dumping it with --pcap-dump would silently drop most frames\n' +
+              '(PCAP frames are not in the DIAG format the dumper expects). Copy the file, or filter it with\n' +
+              'tshark/editcap. Analysis modules such as --stats, --audit and --decoded-sibs-dump work on it.')
+        return 1
 
     # Resolve input source
     diag_input = None

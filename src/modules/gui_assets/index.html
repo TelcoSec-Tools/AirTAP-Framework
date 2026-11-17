@@ -140,6 +140,10 @@
                     <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
                     NV &amp; Bands
                 </button>
+                <button class="nav-tab" data-tab="tab-sim" role="tab" aria-selected="false" id="nav-sim">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 2H9L4 7v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><rect x="8" y="11" width="8" height="7" rx="1"/><line x1="8" y1="14.5" x2="16" y2="14.5"/><line x1="12" y1="11" x2="12" y2="18"/></svg>
+                    SIM &amp; Keys
+                </button>
             </div>
         </div>
 
@@ -2520,6 +2524,95 @@
                         </div>
                     </div>
 
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- ── TAB: SIM / UICC CARD & KEY MATERIAL INVENTORY ─────────────────── -->
+        <section class="tab-content" id="tab-sim" role="tabpanel" aria-labelledby="nav-sim">
+        <div class="sim-grid">
+
+            <!-- Card identity banner -->
+            <div class="card sim-banner-card">
+                <div class="sim-banner-content">
+                    <div class="sim-avatar">
+                        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 2H9L4 7v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><rect x="8" y="11" width="8" height="7" rx="1"/><line x1="8" y1="14.5" x2="16" y2="14.5"/><line x1="12" y1="11" x2="12" y2="18"/></svg>
+                    </div>
+                    <div class="sim-main-titles">
+                        <h2 id="sim-card-title">UICC / USIM Card Profile</h2>
+                        <div class="device-meta-badges">
+                            <span class="dossier-badge highlight" id="sim-card-type">USIM (UICC)</span>
+                            <span class="dossier-badge" id="sim-card-iccid">ICCID —</span>
+                            <span class="dossier-badge" id="sim-card-imsi">IMSI —</span>
+                            <span class="dossier-badge dossier-badge-time" id="sim-last-poll" title="Last inventory refresh">&#x23F1; —</span>
+                        </div>
+                    </div>
+                    <div class="device-header-actions">
+                        <button class="btn btn-secondary" id="btn-sim-refresh" title="Re-read UICC profile and key inventory">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                            Refresh
+                        </button>
+                        <button class="btn btn-secondary" id="btn-sim-export" title="Export inventory as JSON (key material is excluded)">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                            Export JSON
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inventory summary strip -->
+            <div class="sim-stat-row" id="sim-stat-row">
+                <div class="card sim-stat-card">
+                    <div class="sim-stat-label">TOTAL KEY SLOTS</div>
+                    <div class="sim-stat-value" id="sim-stat-total">—</div>
+                </div>
+                <div class="card sim-stat-card">
+                    <div class="sim-stat-label">PRESENT / DERIVED</div>
+                    <div class="sim-stat-value ok" id="sim-stat-present">—</div>
+                </div>
+                <div class="card sim-stat-card">
+                    <div class="sim-stat-label">SEALED (NON-EXTRACTABLE)</div>
+                    <div class="sim-stat-value warn" id="sim-stat-sealed">—</div>
+                </div>
+                <div class="card sim-stat-card">
+                    <div class="sim-stat-label">CARD STATUS</div>
+                    <div class="sim-stat-value" id="sim-stat-status">—</div>
+                </div>
+            </div>
+
+            <!-- Offline / status notice -->
+            <div class="sim-notice" id="sim-notice" style="display:none"></div>
+
+            <!-- Key material groups -->
+            <div class="sim-keys-wrap" id="sim-keys-wrap">
+                <!-- populated by renderSimKeyGroups() -->
+            </div>
+
+            <!-- IMS / VoLTE / VoWiFi configuration -->
+            <div class="card sim-config-card">
+                <div class="card-header">
+                    <div>
+                        <h3 style="margin:0;color:var(--accent-cyan)">IMS / VoLTE / VoWiFi Configuration</h3>
+                        <span style="font-size:11px;color:var(--text-secondary)">EFS configuration objects governing SIP security, ePDG and bearer selection</span>
+                    </div>
+                </div>
+                <div class="sim-config-body" id="sim-config-body">
+                    <div class="sim-empty">No configuration loaded.</div>
+                </div>
+            </div>
+
+            <!-- USIM elementary files -->
+            <div class="card sim-ef-card">
+                <div class="card-header">
+                    <div>
+                        <h3 style="margin:0;color:var(--accent-cyan)">USIM Elementary Files</h3>
+                        <span style="font-size:11px;color:var(--text-secondary)">3GPP TS 31.102 files readable over the ME interface</span>
+                    </div>
+                </div>
+                <div class="sim-ef-body" id="sim-ef-body">
+                    <div class="sim-empty">No elementary files loaded.</div>
                 </div>
             </div>
 

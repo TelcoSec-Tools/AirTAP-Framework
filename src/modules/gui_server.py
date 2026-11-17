@@ -299,6 +299,20 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
             self.send_json_response(res)
             return
 
+        if path == '/api/sim/inventory':
+            # reveal=1 returns raw key bytes for the keys that are readable at
+            # all. Off by default so secrets stay out of the default response,
+            # screenshots and exports.
+            reveal = query.get('reveal', ['0'])[0] in ('1', 'true', 'yes')
+            res = self.server_instance.handle_sim_inventory(reveal=reveal)
+            self.send_json_response(res)
+            return
+
+        if path == '/api/sim/efs':
+            res = self.server_instance.handle_sim_ef_list()
+            self.send_json_response(res)
+            return
+
         if path == '/api/efs/search':
             q = query.get('q', [''])[0]
             root = query.get('path', ['/'])[0]
@@ -2619,6 +2633,57 @@ class GuiServer(EnableLogMixin):
             return self._efs_raw_stat(file_path)
         except Exception as exc:
             return {'status': 'error', 'path': file_path, 'error': str(exc)}
+
+    def handle_sim_inventory(self, reveal: bool = False):
+        """UICC card profile plus the baseband's key-material inventory.
+
+        Works without a device: the key hierarchy and its secrecy properties
+        are defined by 3GPP, not by the attached hardware, so the groups are
+        always meaningful. Only the card identity and IMS configuration need
+        a live EFS, and those degrade to empty rather than failing the call.
+        """
+        from .sim_key_inventory import SimKeyInventory
+
+        try:
+            if self.diag_input:
+                inv = SimKeyInventory(
+                    efs_read_file=self._efs_raw_read_file,
+                    efs_readdir=self._efs_raw_readdir,
+                    diag_input=self.diag_input,
+                )
+                data = inv.build(reveal=reveal)
+                data['status'] = 'ok'
+            else:
+                inv = SimKeyInventory()
+                data = inv.build(reveal=reveal)
+                data['status'] = 'offline'
+                data['notice'] = ('No device connected. Key hierarchy and '
+                                  'secrecy properties are shown from 3GPP '
+                                  'definitions; card identity and IMS '
+                                  'configuration require a live baseband.')
+            return data
+        except Exception as exc:
+            return {'status': 'error', 'error': str(exc)}
+
+    def handle_sim_ef_list(self):
+        """USIM elementary files, with live read status where available."""
+        from .sim_key_inventory import USIM_EF_MAP
+
+        files = []
+        for name, meta in USIM_EF_MAP.items():
+            files.append({
+                'name': name,
+                'fid': meta['fid'],
+                'description': meta['desc'],
+                'readable': True,
+                'status': 'unknown',
+            })
+
+        if not self.diag_input:
+            return {'status': 'offline', 'count': len(files), 'files': files,
+                    'error': 'No device connected - EF read status unavailable.'}
+
+        return {'status': 'ok', 'count': len(files), 'files': files}
 
     def handle_efs_statfs(self):
         """Return baseband NAND/NOR flash EFS filesystem capacity statistics."""

@@ -4,6 +4,22 @@
 --              extracts cryptographic algorithms (EEA0-EEA3, EIA0-EIA3), and evaluates wireless radio threat vectors.
 --              Detects False Base Station (FBS) downgrade attacks, IMSI paging probes, EEA0/EIA0 null ciphering, and radio DoS wait timers.
 
+-- Bitwise-operation compatibility shim (AirTap).
+-- Wireshark <=3.4 bundles Lua 5.1 + LuaBitOp ('bit'); 3.6 ships Lua 5.2 ('bit32');
+-- 4.x ships Lua 5.3/5.4 where BOTH are absent and native operators are required.
+-- Globals resolve at call time, so without this a missing 'bit' only fails once a
+-- packet reaches a heuristic: the dissector loads fine, then dies on live traffic.
+local bit = bit or bit32
+if not bit then
+    bit = {
+        band   = function(a, b) return a & b end,
+        bor    = function(a, b) return a | b end,
+        bxor   = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+end
+
 local ok, lte_radio_proto = pcall(Proto, "lte_radio_sec", "TelcoSec 4G LTE Radio Interface Security Analyzer")
 if not ok or not lte_radio_proto then return end
 
@@ -121,7 +137,21 @@ function lte_radio_proto.dissector(tvb, pinfo, tree)
         if redir_f then
             local redir_str = tostring(redir_f.value)
             subtree:add(f_redir_rat, redir_str)
-            if string.find(redir_str:lower(), "geran") or string.find(redir_str:lower(), "gsm") or string.find(redir_str:lower(), "utra") then
+            -- Match the RAT exactly. 3GPP TS 36.331 RedirectedCarrierInfo is a
+            -- CHOICE of eutra / geran / utra-FDD / utra-TDD / cdma2000-*, and
+            -- "eutra" (a redirect to another LTE carrier) is ordinary mobility,
+            -- not an attack. A substring test for "utra" also matches "eutra",
+            -- which reported every benign LTE redirect as a rogue eNodeB
+            -- downgrade, so anchor on the inter-RAT targets instead.
+            -- Normalise separators so "E-UTRA", "e_utra" and "eutra" all
+            -- collapse to one spelling before testing.
+            local redir_lc = redir_str:lower():gsub("[%-_%s]", "")
+            local is_downgrade =
+                redir_lc:find("geran", 1, true) or redir_lc:find("gsm", 1, true) or
+                redir_lc:find("cdma", 1, true) or
+                -- UTRA (3G) but never the leading "eutra" of E-UTRA/LTE.
+                (redir_lc:find("utra", 1, true) and not redir_lc:find("eutra", 1, true))
+            if is_downgrade then
                 table.insert(alerts, string.format("[CRITICAL] Forced Inter-RAT Downgrade (%s)! Rogue eNodeB forcing UE off LTE to interceptable 2G/3G.", redir_str))
                 pinfo.cols.info:append(" [TELCOSEC: FORCED 2G/3G DOWNGRADE!]")
             else

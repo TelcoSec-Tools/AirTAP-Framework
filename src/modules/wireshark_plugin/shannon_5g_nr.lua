@@ -72,10 +72,12 @@ function shannon_5g_proto.dissector(tvb, pinfo, tree)
             pinfo.cols.info:append(" [TELCOSEC: SUPI HARVEST PROBE]")
         end
 
-        -- 2. Null Ciphering (NEA0 / NIA0)
-        if sig_type == 0 and string.find(hex_str, "0000") and pdu_len < 25 then
-            subtree:add(f_sec_alert, "[CRITICAL] Potential NEA0 / NIA0 Null Security negotiated in 5G NR SecurityModeCommand!")
-        end
+        -- 2. Null Ciphering (NEA0 / NIA0): detected by nr_radio_sec.lua from the
+        -- UPER-decoded nr-rrc.cipheringAlgorithm / integrityProtAlgorithm
+        -- fields populated by the native nr-rrc dissector invoked below.
+        -- A "0000" substring scan over a bit-packed ASN.1 PDU matched at any
+        -- nibble offset regardless of field position, so benign
+        -- SecurityModeCommand frames raised [CRITICAL] null-security alerts.
 
         -- Call subdissector
         if sig_type == 0 and nr_rrc_dl_dcch_dissector then

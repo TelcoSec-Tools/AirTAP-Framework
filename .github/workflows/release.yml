@@ -1,0 +1,195 @@
+name: Release
+
+# Publishes to PyPI when a version tag is pushed.
+#
+# Nothing is uploaded until a PyPI Trusted Publisher is configured for this
+# repository — see docs/wiki/Contributing.md or the setup notes below. No API
+# token is stored anywhere: PyPI mints a short-lived credential from the
+# workflow's OIDC identity at publish time.
+#
+# Setup (once, on PyPI):
+#   1. https://pypi.org/manage/account/publishing/
+#   2. Add a pending publisher:
+#        PyPI project name : airtap
+#        Owner             : TelcoSec-Tools
+#        Repository        : AirTAP-Framework
+#        Workflow name     : release.yml
+#        Environment       : pypi
+#   3. Create a repository environment named "pypi" (Settings -> Environments)
+#      and add required reviewers if you want a manual approval gate before
+#      each upload.
+#
+# Then: git tag -a v2.6.1 -m "..." && git push origin v2.6.1
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+rc[0-9]+'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Where to publish'
+        required: true
+        default: testpypi
+        type: choice
+        options: [testpypi, pypi]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Validate Release Artifacts
+    # Built on Linux on purpose: a wheel built on Windows loses the executable
+    # bit on the bundled adb binaries, since setuptools reads the filesystem
+    # mode and NTFS has none to read.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Resolve package version
+        id: version
+        run: |
+          VERSION=$(python -c "import re,io; print(re.search(r\"__version__\s*=\s*'([^']+)'\", io.open('src/__init__.py',encoding='utf-8').read()).group(1))")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+      - name: Verify the tag matches the package version
+        # A tag that disagrees with __version__ would publish a release whose
+        # artifacts are named differently from the ref that produced them, and
+        # a PyPI version can never be reused once uploaded.
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.version.outputs.version }}"
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match __version__ ($VERSION)"
+            exit 1
+          fi
+          echo "Tag and package version agree: $VERSION"
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check package metadata with Twine
+        run: twine check dist/*
+
+      - name: Validate distribution contents
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel_files = glob.glob('dist/*.whl')
+          if not wheel_files:
+              sys.exit('Error: No wheel file found in dist/')
+
+          wheel = wheel_files[0]
+          archive = zipfile.ZipFile(wheel)
+          names = archive.namelist()
+
+          errors = []
+
+          # A wheel that installs src/'s subdirectories as top-level packages
+          # breaks `import airtap` and squats generic names such as `inputs`.
+          tops = {n.split('/')[0] for n in names if '/' in n}
+          unexpected = {t for t in tops if t != 'airtap' and not t.endswith('.dist-info')}
+          if unexpected:
+              errors.append('unexpected top-level packages in the wheel: %s'
+                            % ', '.join(sorted(unexpected)))
+          if 'airtap/__init__.py' not in names:
+              errors.append('airtap package missing from the wheel')
+
+          # The Wireshark dissectors are required for 5G NR RRC/NAS dissection.
+          lua_dissectors = [name for name in names if name.endswith('.lua')]
+          if not lua_dissectors:
+              errors.append('no Wireshark .lua dissectors found in the wheel')
+          else:
+              print(f"Found {len(lua_dissectors)} Wireshark Lua dissectors in wheel.")
+
+          # Bundled adb binaries must keep their executable bit.
+          for required in ('adb_linux', 'adb_macos'):
+              matches = [name for name in names if name.endswith(required)]
+              if not matches:
+                  errors.append('%s missing from the wheel' % required)
+                  continue
+              mode = (archive.getinfo(matches[0]).external_attr >> 16) & 0o777
+              if not mode & 0o111:
+                  errors.append('%s is not executable in the wheel (mode %o)' % (required, mode))
+
+          if errors:
+              sys.exit('Release artifact check failed:\n  ' + '\n  '.join(errors))
+
+          print('Release artifact check passed successfully for %s' % wheel)
+          PY
+
+      - name: Smoke-test the wheel in a clean environment
+        # Catches the failure mode where pip install succeeds but the package
+        # is unimportable — the exact defect that shipped in an earlier build.
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --quiet dist/*.whl
+          /tmp/smoke/bin/python - <<'PY'
+          import airtap
+          from airtap.modules.wireshark_plugin.install_plugins import list_dissectors
+          print('import airtap OK, version', airtap.__version__)
+          count = len(list_dissectors())
+          print('dissectors reachable:', count)
+          assert count >= 100, 'dissectors missing from the installed package'
+          for polluted in ('inputs', 'modules', 'protocol'):
+              try:
+                  __import__(polluted)
+              except ImportError:
+                  continue
+              raise SystemExit('namespace pollution: top-level %r is importable' % polluted)
+          PY
+          /tmp/smoke/bin/airtap --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'testpypi'
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write          # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.target == 'pypi')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write          # required for Trusted Publishing (OIDC)
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

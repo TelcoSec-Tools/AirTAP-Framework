@@ -28,6 +28,7 @@ local f_msg_type     = ProtoField.uint8("gprs_gmm_sm_sec.msg_type", "Message Typ
 local f_msg_name     = ProtoField.string("gprs_gmm_sm_sec.msg_name", "Message Name")
 local f_ptmsi        = ProtoField.string("gprs_gmm_sm_sec.ptmsi", "Allocated P-TMSI")
 local f_apn          = ProtoField.string("gprs_gmm_sm_sec.apn", "Access Point Name (APN)")
+local f_cipher_algo  = ProtoField.string("gprs_gmm_sm_sec.cipher_algo", "Negotiated GEA Cipher")
 local f_sec_alert    = ProtoField.string("gprs_gmm_sm_sec.alert", "TelcoSec GPRS Security Alert")
 local f_payload      = ProtoField.bytes("gprs_gmm_sm_sec.payload", "GMM/SM Raw Payload")
 
@@ -37,8 +38,22 @@ gprs_gmm_proto.fields = {
     f_msg_name,
     f_ptmsi,
     f_apn,
+    f_cipher_algo,
     f_sec_alert,
     f_payload
+}
+
+-- 3GPP TS 24.008 10.5.5.3, table 10.5.136: "Type of algorithm", bits 3..1 of
+-- the Ciphering algorithm IE. 000 means ciphering is not applied at all.
+local GEA_ALGORITHMS = {
+    [0] = "GEA0 (No Encryption / Plaintext)",
+    [1] = "GEA1 (Cryptographically Broken - 40-bit effective key)",
+    [2] = "GEA2 (Legacy 64-bit Cipher)",
+    [3] = "GEA3 (128-bit Kasumi)",
+    [4] = "GEA4 (128-bit)",
+    [5] = "GEA5 (128-bit SNOW 3G)",
+    [6] = "GEA6 (128-bit)",
+    [7] = "GEA7 (128-bit)"
 }
 
 -- GPRS GMM/SM Message Types
@@ -100,7 +115,33 @@ function gprs_gmm_proto.dissector(tvb, pinfo, tree)
         end
     end
 
-    -- Security Heuristic 3: Deactivate PDP Context Request
+    -- Security Heuristic 3: GEA cipher selection in Authentication & Ciphering
+    -- Request. This is where GPRS ciphering is actually negotiated: 3GPP
+    -- TS 24.008 table 9.4.9 puts the Ciphering algorithm IE (10.5.5.3) in the
+    -- lower half of octet 3, immediately after the message type, as a type 1
+    -- IE. Bits 3..1 carry the algorithm and bit 4 is spare.
+    --
+    -- Read at its defined offset rather than searched for. An earlier revision
+    -- scanned a hex dump of LLC frames for the substring "0000", which was
+    -- wrong twice over: unanchored matching flagged benign frames, and LLC XID
+    -- carries no ciphering parameter at all (TS 44.064 XID types are version,
+    -- IOV, T200, N200, N201, mD/mU, kD/kU, Layer-3 and Reset).
+    if msg_type == 0x12 and tvb:len() >= 3 then
+        local gea = bit.band(tvb(2, 1):uint(), 0x07)
+        local gea_name = GEA_ALGORITHMS[gea] or string.format("GEA%d (unknown)", gea)
+        subtree:add(f_cipher_algo, gea_name)
+        pinfo.cols.info:append(string.format(" (%s)", gea_name))
+
+        if gea == 0 then
+            subtree:add(f_sec_alert, "[CRITICAL] Network commanded GEA0 (Null Encryption)! All GPRS user data, DNS and IP traffic will be transmitted in plaintext.")
+            pinfo.cols.info:append(" [TELCOSEC: GEA0 NULL-CIPHER COMMANDED]")
+        elseif gea == 1 then
+            subtree:add(f_sec_alert, "[WARNING] GEA1 negotiated. GEA1 has a known 40-bit effective key weakness and is crackable in real time.")
+            pinfo.cols.info:append(" [TELCOSEC: WEAK GEA1 CIPHER]")
+        end
+    end
+
+    -- Security Heuristic 4: Deactivate PDP Context Request
     if msg_type == 0x44 then
         subtree:add(f_sec_alert, "[WARNING] PDP Context Deactivation commanded. Packet data session severed.")
     end

@@ -26,7 +26,11 @@ if not ok or not gprs_llc_proto then return end
 local f_sapi         = ProtoField.uint8("gprs_llc_sec.sapi", "LLC SAPI", base.DEC)
 local f_frame_type   = ProtoField.string("gprs_llc_sec.frame_type", "Frame Type")
 local f_nu           = ProtoField.uint16("gprs_llc_sec.nu", "N(U) Unconfirmed Sequence", base.DEC)
+-- Retained and registered although this dissector no longer sets it: GEA
+-- selection is a GMM field, decoded by gprs_gmm_sm_sec.lua. Keeping the field
+-- registered preserves saved Wireshark filters referencing gprs_llc_sec.cipher_algo.
 local f_cipher_algo  = ProtoField.string("gprs_llc_sec.cipher_algo", "Negotiated GEA Cipher")
+local f_xid_param    = ProtoField.string("gprs_llc_sec.xid_param", "LLC XID Parameter")
 local f_fcs          = ProtoField.uint24("gprs_llc_sec.fcs", "Frame Check Sequence (FCS)", base.HEX)
 local f_sec_alert    = ProtoField.string("gprs_llc_sec.alert", "TelcoSec GPRS Security Alert")
 local f_payload      = ProtoField.bytes("gprs_llc_sec.payload", "LLC Information Payload")
@@ -36,6 +40,7 @@ gprs_llc_proto.fields = {
     f_frame_type,
     f_nu,
     f_cipher_algo,
+    f_xid_param,
     f_fcs,
     f_sec_alert,
     f_payload
@@ -50,6 +55,24 @@ local LLC_SAPIS = {
     [8]  = "TOM (Tunneling of Messages)",
     [9]  = "SNDCP (User Plane IP / Data)",
     [11] = "SNDCP (User Plane IP / Data)"
+}
+
+-- 3GPP TS 44.064 6.4.1: XID parameter types, carried in bits 6..2 of the
+-- first octet of each parameter. None of these is a ciphering algorithm.
+local XID_PARAM_TYPES = {
+    [0x00] = "Version",
+    [0x01] = "IOV-UI",
+    [0x02] = "IOV-I",
+    [0x03] = "T200",
+    [0x04] = "N200",
+    [0x05] = "N201-U",
+    [0x06] = "N201-I",
+    [0x07] = "mD",
+    [0x08] = "mU",
+    [0x09] = "kD",
+    [0x0A] = "kU",
+    [0x0B] = "Layer-3 Parameters",
+    [0x0C] = "Reset"
 }
 
 -- Native GPRS dissectors
@@ -85,20 +108,58 @@ function gprs_llc_proto.dissector(tvb, pinfo, tree)
 
     pinfo.cols.info = string.format("[GPRS LLC] %s | %s", frame_type, sapi_name)
 
-    -- Security Heuristic 1: XID Parameter Negotiation (GEA Cipher Selection)
-    if frame_type == "U (Unnumbered / XID)" and tvb:len() >= 6 then
-        local hex_str = tostring(tvb:bytes():tohex())
-        if string.find(hex_str, "0000") or string.find(hex_str, "0100") then
-            subtree:add(f_cipher_algo, "GEA0 (No Encryption / Plaintext)")
-            subtree:add(f_sec_alert, "[CRITICAL] Network forced GEA0 (Null Encryption)! All 2G/GPRS user data, DNS, and IP traffic transmitted in plaintext.")
-            pinfo.cols.info:append(" [TELCOSEC: GEA0 NULL-CIPHER DETECTED!]")
-        elseif string.find(hex_str, "0101") then
-            subtree:add(f_cipher_algo, "GEA1 (Cryptographically Broken Cipher)")
-            subtree:add(f_sec_alert, "[WARNING] GEA1 cipher negotiated. GEA1 has intentional 40-bit weakness crackable in real-time.")
-        elseif string.find(hex_str, "0102") then
-            subtree:add(f_cipher_algo, "GEA2 (Legacy 64-bit Cipher)")
-        elseif string.find(hex_str, "0103") then
-            subtree:add(f_cipher_algo, "GEA3 (128-bit Kasumi Cipher - Secure)")
+    -- Security Heuristic 1: XID parameter negotiation.
+    --
+    -- GEA cipher selection is NOT negotiated here. 3GPP TS 44.064 defines the
+    -- XID parameter types as version, IOV-UI, IOV-I, T200, N200, N201-U,
+    -- N201-I, mD, mU, kD, kU, Layer-3 parameters and Reset; none of them
+    -- carries a ciphering algorithm. GPRS ciphering is selected by the GMM
+    -- Authentication & Ciphering Request (TS 24.008 9.4.9), and that check now
+    -- lives in gprs_gmm_sm_sec.lua, reading the IE at its defined offset.
+    --
+    -- The previous revision searched a hex dump of the whole frame for "0000"
+    -- and reported a [CRITICAL] forced-GEA0 alert on any match. The search was
+    -- unanchored, so it matched across byte boundaries at any nibble offset,
+    -- and it looked in a protocol layer that does not carry the field, so the
+    -- alert could never have been correct. Decoded below for visibility only.
+    if frame_type == "U (Unnumbered / XID)" and tvb:len() >= 4 then
+        local xid_tree = subtree:add(gprs_llc_proto, tvb(), "LLC XID Parameters")
+        local offset = 3
+        local limit = tvb:len() - 3 -- exclude the 3-byte FCS
+        local guard = 0
+
+        while offset < limit and guard < 32 do
+            guard = guard + 1
+            local byte1 = tvb(offset, 1):uint()
+            local xl = bit.band(byte1, 0x80) ~= 0
+            local xtype = bit.rshift(bit.band(byte1, 0x7C), 2)
+            local plen, header
+
+            if xl then
+                -- Extended length: 2 high bits here, 6 low bits in the next
+                -- octet (its bottom 2 bits are spare).
+                if offset + 1 >= limit then break end
+                local byte2 = tvb(offset + 1, 1):uint()
+                plen = bit.bor(bit.lshift(bit.band(byte1, 0x03), 6),
+                               bit.rshift(bit.band(byte2, 0xFC), 2))
+                header = 2
+            else
+                plen = bit.band(byte1, 0x03)
+                header = 1
+            end
+
+            if offset + header + plen > limit then break end
+            xid_tree:add(f_xid_param, string.format("%s (type %d, %d byte%s)",
+                XID_PARAM_TYPES[xtype] or string.format("Unknown type %d", xtype),
+                xtype, plen, plen == 1 and "" or "s"))
+
+            -- A Reset parameter tears down the LLC ciphering state, which is a
+            -- precondition for re-negotiating a weaker cipher at GMM level.
+            if xtype == 0x0C then
+                xid_tree:add(f_sec_alert, "[INFO] LLC XID Reset parameter: ciphering and sequence state cleared. Correlate with any following Authentication & Ciphering Request.")
+            end
+
+            offset = offset + header + plen
         end
     end
 

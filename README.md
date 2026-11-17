@@ -434,6 +434,12 @@ We welcome contributions from the telecommunications and cybersecurity community
 
 AirTap is designed for research, educational purposes, network auditing, and authorized telecommunications diagnostics. Capturing radio signaling may expose sensitive subscriber identifiers (IMSI, IMEI) and location information. Use AirTap only on networks and devices you own or are explicitly authorized to test.
 
+### Do not expose the Web GUI to a network
+
+The Visual Operations Suite (`--gui`) binds to `127.0.0.1` and **has no authentication**. That is deliberate: it is a local operator console, not a multi-user service. Its API can write persistent baseband NVRAM (`/api/nv/write`), execute AT and raw Diag commands (`/api/terminal/exec`, `/api/terminal/diag_raw`), read the modem filesystem, and stream live captured signaling.
+
+Anyone who can reach the port has all of that, unauthenticated. Do not bind it to `0.0.0.0`, forward the port, or place it behind a reverse proxy without adding your own authentication and TLS in front. Requests from other web origins are rejected, so a page you visit while AirTap is running cannot drive the API, but that guard does not substitute for network isolation.
+
 For vulnerability disclosure guidelines, please read our [Security Policy](SECURITY.md).
 
 ---

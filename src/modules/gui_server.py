@@ -79,7 +79,73 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass # Suppress noisy standard HTTP access logs
 
+    def _is_same_origin(self):
+        """Reject requests a browser issued from another site.
+
+        The GUI binds to loopback and has no authentication, so the browser's
+        ambient authority is the whole authentication story: any page the
+        operator visits while AirTap runs can reach this server. Without this
+        check a hostile page could POST to /api/nv/write (persistent baseband
+        NVRAM), /api/terminal/diag_raw and /api/terminal/exec, and read back
+        /api/sim/inventory, EFS contents and captured signaling.
+
+        A JSON body does not protect those endpoints: the handlers never
+        inspect Content-Type, so a form post of text/plain is accepted, and
+        that is a CORS "simple request" which browsers send with no preflight.
+
+        Origin is set by the browser on every cross-origin request and cannot
+        be forged by page script. A missing Origin means a same-origin
+        navigation or a non-browser client (curl, scripts), which is allowed:
+        those carry no ambient credentials to abuse.
+        """
+        origin = self.headers.get('Origin')
+        if not origin:
+            # Fall back to Referer for the few browsers/paths that omit Origin.
+            referer = self.headers.get('Referer')
+            if not referer:
+                return True
+            origin = referer
+
+        try:
+            parsed = urlparse(origin)
+        except Exception:
+            return False
+        if not parsed.hostname:
+            return False
+
+        # Accept only loopback, on the port this server is actually serving.
+        if parsed.hostname not in ('127.0.0.1', 'localhost', '::1', '[::1]'):
+            return False
+
+        expected_port = getattr(self.server_instance, 'port', None)
+        if expected_port is None:
+            return True
+        actual_port = parsed.port
+        if actual_port is None:
+            actual_port = 443 if parsed.scheme == 'https' else 80
+        return actual_port == expected_port
+
+    def _reject_cross_origin(self):
+        """Send 403 for a disallowed origin. Returns True when rejected."""
+        if self._is_same_origin():
+            return False
+        self.send_response(403)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+        try:
+            self.wfile.write(json.dumps({
+                'status': 'error',
+                'error': 'Cross-origin request rejected. The AirTap API is '
+                         'reachable only from the local GUI.',
+            }).encode('utf-8'))
+        except Exception:
+            pass
+        return True
+
     def do_GET(self):
+        if self._reject_cross_origin():
+            return
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -575,6 +641,9 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
         self.serve_file(join(GUI_ASSETS_DIR, 'index.html'), 'text/html; charset=utf-8')
 
     def do_POST(self):
+        if self._reject_cross_origin():
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
 
@@ -898,7 +967,11 @@ class AirTapGuiHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-Type', 'application/json; charset=utf-8')
             self.send_header('Content-Length', str(len(payload)))
-            self.send_header('Access-Control-Allow-Origin', '*')
+            # No Access-Control-Allow-Origin: the GUI is same-origin, and a
+            # wildcard here let any website read API responses (subscriber
+            # identities, EFS contents, captured signaling) from an operator's
+            # browser. Cross-origin callers are rejected before reaching here.
+            self.send_header('X-Content-Type-Options', 'nosniff')
             self.send_header('Connection', 'close')
             self.end_headers()
             self.wfile.write(payload)

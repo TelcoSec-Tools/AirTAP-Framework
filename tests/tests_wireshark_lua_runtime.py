@@ -136,23 +136,52 @@ class TestSecurityHeuristicPrecision(unittest.TestCase):
         r'string\.find\(\s*(?:hex_str|hex_pdu|raw_hex|raw_bytes_str)\s*,\s*"([0-9a-fA-F]{1,4})"')
 
     def test_no_short_hex_substring_alerts(self):
+        """No dissector may drive an alert from a 1-2 byte hex substring.
+
+        Every such site has been replaced with either a decoded-field read or
+        a positional parse, so this now applies across the whole plugin set
+        rather than to a carve-out list of RATs.
+        """
         offenders = []
         for fname in lua_files():
             for i, line in enumerate(read(fname).split("\n"), 1):
                 m = self.SHORT_HEX.search(line)
                 if m:
                     offenders.append("%s:%d (pattern %r)" % (fname, i, m.group(1)))
-        # GSM/GPRS/WCDMA sites have no decoded-field equivalent available and
-        # are tracked separately; LTE/5G sites must use decoded fields.
-        lte_5g = [o for o in offenders
-                  if o.split(":")[0] in {"qc_lte_rrc.lua", "qc_5g_nr_rrc.lua",
-                                         "shannon_lte.lua", "shannon_5g_nr.lua",
-                                         "qc_gsm_l3.lua"}]
         self.assertEqual(
-            lte_5g, [],
-            "LTE/5G security alerts must come from UPER-decoded fields, not "
-            "short hex substring scans: %s" % lte_5g,
+            offenders, [],
+            "security alerts must come from decoded fields or a positional "
+            "parse, not short hex substring scans: %s" % offenders,
         )
+
+    def test_gea_is_read_from_the_gmm_ciphering_ie(self):
+        """GPRS ciphering is selected by GMM, not by LLC XID.
+
+        3GPP TS 44.064 XID parameter types are version, IOV, T200, N200,
+        N201, mD/mU, kD/kU, Layer-3 and Reset: none carries a cipher. An
+        earlier revision scanned LLC frames for "0000" and reported a forced
+        GEA0, an alert that could never have been correct because the field
+        is not in that layer.
+        """
+        gmm = read("gprs_gmm_sm_sec.lua")
+        self.assertIn("0x12", gmm,
+                      "GMM Authentication & Ciphering Request not handled")
+        self.assertIn("GEA_ALGORITHMS", gmm,
+                      "no GEA algorithm table in the GMM dissector")
+
+        llc = read("gprs_llc_sec.lua")
+        self.assertNotIn(
+            'string.find(hex_str, "0000")', llc,
+            "LLC substring GEA scan reintroduced; GEA is not an LLC field")
+
+    def test_bssmap_encryption_ie_is_parsed_positionally(self):
+        """TS 48.008 3.2.2.10: Encryption Information is a TLV, IEI 0x0A."""
+        src = read("gsm_bssmap_sec.lua")
+        self.assertIn("0x0A", src, "Encryption Information IEI not referenced")
+        self.assertIn("A5_ALGORITHMS", src,
+                      "no permitted-algorithms bitmask table")
+        self.assertNotIn('string.find(hex_str, "0101")', src,
+                         "BSSMAP substring cipher scan reintroduced")
 
     def test_eutra_is_not_treated_as_an_lte_downgrade(self):
         """From LTE, redirect to 'eutra' is normal mobility, not an attack.

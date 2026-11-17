@@ -91,7 +91,11 @@ function M.tvb(bytes)
         function r:bytes() return M.bytearray(bytes:sub(off + 1, off + len)) end
         function r:raw() return bytes:sub(off + 1, off + len) end
         function r:range(o, l) return rng(off + (o or 0), l) end
-        function r:tvb() return tv end
+        -- Wireshark's range:tvb() returns a NEW buffer re-based on the slice,
+        -- so sub(0,1) is the slice's first byte, not the outer buffer's.
+        -- Returning the outer tvb here silently shifted every offset in any
+        -- dissector that delegates a sub-PDU.
+        function r:tvb() return M.tvb(bytes:sub(off + 1, off + len)) end
         function r:offset() return off end
         function r:bitfield(b, n)
             local byte = bytes:byte(off + 1 + math.floor(b / 8)) or 0

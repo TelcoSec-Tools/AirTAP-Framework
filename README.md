@@ -7,9 +7,11 @@
 [![Standards](https://img.shields.io/badge/3GPP-2G%20%7C%203G%20%7C%204G%20%7C%205G%20NR%20%7C%20IMS-orange.svg)](https://www.3gpp.org/)
 [![TelcoSec Academy](https://img.shields.io/badge/TelcoSec%20Academy-app.telcosec.net-00f0ff.svg?logo=terminal)](https://app.telcosec.net)
 
-**AirTap** is a modern, modular cellular radio diagnostics, packet capture, and security auditing framework. Communicating directly with Qualcomm-based baseband modems via the diagnostic (DIAG) protocol, AirTap decodes and encapsulates raw **2G, 3G, 4G, and 5G NR** radio signaling frames in real time into standard **GSMTAP v2 PCAP** streams and **live Wireshark** sessions.
+**AirTap** is a modular cellular radio diagnostics, packet capture, and security auditing framework. It talks directly to Qualcomm-based baseband modems over the diagnostic (DIAG) protocol and decodes raw **2G, 3G, 4G, and 5G NR** signaling in real time into standard **GSMTAP v2 PCAP** streams and **live Wireshark** sessions.
 
-AirTap also provides an **embedded baseband security auditor** with 88 master telecom threat rules, a pure-Python **3GPP ASN.1 UPER/PER engine**, **Subscriber Identity & Silent SMS dissectors**, an interactive **EFS (Embedded File System) shell**, **Baseband NVRAM Band Locker Studio**, **QXDM F3 debug message / event streamer**, and real-time **Geospatial RF wardrive telemetry**.
+Detection is **deterministic, not probabilistic**: a pure-Python 3GPP ASN.1 UPER/PER engine decodes each protocol field at its specified offset, and 88 auditable rules evaluate those decoded values. There is no model, no training data, and no inference — every alert traces to a named field and a 3GPP clause you can verify yourself. In a tool whose output drives real security decisions, a finding you cannot reproduce is worse than no finding at all.
+
+Alongside capture, AirTap ships an **embedded baseband security auditor**, **subscriber identity & Silent SMS dissectors**, an interactive **EFS filesystem shell**, a **baseband NVRAM band-locking studio**, a **QXDM F3 debug and event streamer**, and real-time **geospatial RF wardrive telemetry**.
 
 ---
 
@@ -22,6 +24,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 ## Table of Contents
 
 - [Key Capabilities](#key-capabilities)
+- [How Detection Works](#how-detection-works)
 - [Architecture Overview](#architecture-overview)
 - [Supported Radio Technologies & Protocols](#supported-radio-technologies--protocols)
 - [Hardware & Capture Sources](#hardware--capture-sources)
@@ -40,29 +43,51 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 - [TelcoSec Academy (Training & Labs)](#telcosec-academy--hands-on-telecom-security-training)
 - [Command-Line Reference](#command-line-reference)
 - [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Responsible Use & Security](#responsible-use--security)
 - [License & Acknowledgements](#license--acknowledgements)
 
 ---
 
-## Key Capabilities
+## ⚡ Key Capabilities
 
-- **Real-Time 2G / 3G / 4G / 5G NR Capture**: Streams raw over-the-air radio signaling (RRC, NAS, MAC, RLC, PDCP, SIBs, SDAP) into GSMTAP v2 frames for Wireshark.
-- **Embedded Security Auditor (88 Master Rules)**: Automated detection of IMSI catchers, null ciphering (`EEA0`/`NEA0`), null integrity (`EIA0`/`NIA0`), Silent SMS (Type 0), SIMjacker, and ETSI TS 102 232 Lawful Interception taps.
-- **Pure-Python 3GPP ASN.1 UPER / PER Engine**: Native bit-stream decoder for 5G NR SIB1..SIB19 (NTN Satellite), 4G RRC, C-V2X Sidelink Direct PC5, LPP Positioning (TS 37.355), and European eCall MSD (EN 15722).
-- **Subscriber Identity & Silent SMS Suite**: Real-time extraction of IMSI, TMSI, 4G/5G GUTI, SUCI, Type 0 Silent SMS, Flash Class 0, and SIM OTA commands.
-- **Geospatial Wardrive & Tactical Map**: Live baseband RSRP heatmap contours, multi-sector tower triangulation, Timing Advance (TA) perimeter rings, and CALEA surveillance vectors.
-- **Baseband NVRAM Studio & Band Locker**: Direct modem NV writing (`DIAG_NV_WRITE_F`), 5G NR band preference masks (n1..n261 mmWave), and SA/NSA mode control.
-- **AirTap Visual Operations Suite**: Dedicated operational views (Live Signaling, Threat Radar, Identities, SMS, OTA, Wardrive Map, NV Studio, EFS Explorer, AT Terminal, Protocol Fuzzer, and CALEA LI).
-- **107+ Wireshark Lua Dissectors**: Built-in dissector suite covering 5G NR, LTE, SS7, Diameter, eSIM RSP, STK Proactive, and carrier interfaces.
-- **Multi-Vendor Diagnostic Support**: Qualcomm DIAG, Samsung Shannon (Exynos/Tensor), and MediaTek (Dimensity/Helio) trace formats.
-- **Interactive Session Replayer**: High-precision scrubbing, stepping, and 0.5x..10x playback across PCAP, DLF, QMDL2, and GeoJSON streams.
-- **Cross-Platform Support**: Works seamlessly on Linux, macOS, Windows, and WSL2 with self-healing ADB watchdog auto-reconnect.
+- 📡 **Real-Time 2G / 3G / 4G / 5G NR Capture**: Streams raw over-the-air radio signaling (RRC, NAS, MAC, RLC, PDCP, SIBs, SDAP) into GSMTAP v2 frames for Wireshark.
+- 🛡️ **Embedded Security Auditor (88 Master Rules)**: Automated detection of IMSI catchers, null ciphering (`EEA0`/`NEA0`), null integrity (`EIA0`/`NIA0`), Silent SMS (Type 0), SIMjacker, and ETSI TS 102 232 Lawful Interception taps.
+- 🧬 **Pure-Python 3GPP ASN.1 UPER / PER Engine**: Native bit-stream decoder for 5G NR SIB1..SIB19 (NTN Satellite), 4G RRC, C-V2X Sidelink Direct PC5, LPP Positioning (TS 37.355), and European eCall MSD (EN 15722).
+- 🪪 **Subscriber Identity & Silent SMS Suite**: Real-time extraction of IMSI, TMSI, 4G/5G GUTI, SUCI, Type 0 Silent SMS, Flash Class 0, and SIM OTA commands.
+- 🗺️ **Geospatial Wardrive & Tactical Map**: Live baseband RSRP heatmap contours, multi-sector tower triangulation, Timing Advance (TA) perimeter rings, and CALEA surveillance vectors.
+- 🎛️ **Baseband NVRAM Studio & Band Locker**: Direct modem NV writing (`DIAG_NV_WRITE_F`), 5G NR band preference masks (n1..n261 mmWave), and SA/NSA mode control.
+- 🖥️ **AirTap Visual Operations Suite**: Dedicated operational views (Live Signaling, Threat Radar, Identities, SMS, OTA, Wardrive Map, NV Studio, EFS Explorer, AT Terminal, Protocol Fuzzer, and CALEA LI).
+- 🦈 **107+ Wireshark Lua Dissectors**: Built-in dissector suite covering 5G NR, LTE, SS7, Diameter, eSIM RSP, STK Proactive, and carrier interfaces.
+- 🔌 **Multi-Vendor Diagnostic Support**: Qualcomm DIAG, Samsung Shannon (Exynos/Tensor), and MediaTek (Dimensity/Helio) trace formats.
+- ⏯️ **Interactive Session Replayer**: High-precision scrubbing, stepping, and 0.5x..10x playback across PCAP, DLF, QMDL2, and GeoJSON streams.
+- 💻 **Cross-Platform Support**: Works seamlessly on Linux, macOS, Windows, and WSL2 with self-healing ADB watchdog auto-reconnect.
 
 ---
 
-## Architecture Overview
+## 🔍 How Detection Works
+
+Every finding AirTap reports is reproducible from the packet bytes. The pipeline is three deterministic stages:
+
+| Stage | What happens | Why it matters |
+| :--- | :--- | :--- |
+| **1. Decode** | The ASN.1 UPER/PER engine and the Lua dissectors parse each PDU into named 3GPP fields at their specified offsets. | A field is read where the spec says it lives, never searched for. |
+| **2. Evaluate** | 88 rules test those decoded values (`cipheringAlgorithm == 0`, `redirectedCarrierInfo == geran`, `tp_pid == 0x40`). | Each rule is a readable condition on a named field, not a weighting. |
+| **3. Report** | Alerts cite the rule ID, the field, and the 3GPP clause that defines it. | You can verify any alert against the spec and the capture. |
+
+This is a deliberate design choice. An earlier revision matched cipher codes as substrings of a hex-dumped PDU; on measurement, **73% of ordinary release messages** tripped a `[CRITICAL]` IMSI-catcher alert. Those heuristics were replaced with positional field reads. In an auditing tool a false critical is worse than a miss, because it teaches the operator to ignore the real ones.
+
+What this means in practice:
+
+- 🧾 **Auditable** — every alert maps to a `TELCOSEC-VULN-###` rule and a spec clause.
+- 🔁 **Reproducible** — the same capture always yields the same findings.
+- 🚫 **No model, no telemetry** — nothing is uploaded, inferred, or scored; captures never leave your machine.
+- 🧪 **Regression-tested** — dissectors run under a real Lua 5.3+ interpreter in CI, so a decoder that dies on the first packet fails the build instead of failing silently on live traffic.
+
+---
+
+## 🏗️ Architecture Overview
 
 <div align="center">
   <img src="docs/airtap_architecture.svg" alt="AirTap System Architecture Diagram" width="100%">
@@ -89,7 +114,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 |   +-------------------+  +-------------------+  +-------------------------------+ |
 |   |  GSMTAP Dumper    |  |  Radio Security   |  |  Diagnostic & Control Modules | |
 |   |  - 2G/3G/4G/5G NR |  |  Auditor Engine   |  |  - Interactive EFS Shell      | |
-|   |  - SIB Reassembly |  |  - 80 Threat Rules|  |  - NV RAM Item Manager        | |
+|   |  - SIB Reassembly |  |  - 88 Threat Rules|  |  - NV RAM Item Manager        | |
 |   |  - NAS Decrypt    |  |  - IMSI Catchers  |  |  - QXDM F3 Debug & Events     | |
 |   |  - IMS/VoLTE SIP  |  |  - Silent SMS     |  |  - RF Signal Telemetry & Stats| |
 |   |  - 107 Dissectors |  |  - CALEA / LI     |  |  - 3GPP Protocol Fuzzer       | |
@@ -105,7 +130,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 
 ---
 
-## Supported Radio Technologies & Protocols
+## 📶 Supported Radio Technologies & Protocols
 
 | Technology | Supported Layers & Protocols | Advanced Features |
 | :--- | :--- | :--- |
@@ -119,7 +144,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 
 ---
 
-## Hardware & Capture Sources
+## 🔌 Hardware & Capture Sources
 
 1. **Rooted Android Devices (Qualcomm Snapdragon)**:
    - Connect phone via USB with USB Debugging enabled.
@@ -137,7 +162,7 @@ AirTap also provides an **embedded baseband security auditor** with 88 master te
 
 ---
 
-## Installation
+## 📦 Installation
 
 ### From Source (Recommended)
 
@@ -165,7 +190,7 @@ airtap --install-plugins
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Launch the Visual Operations Suite (Web GUI)
 ```bash
@@ -220,7 +245,7 @@ airtap -a --shell
 
 ---
 
-## Feature Showcase
+## 🔬 Feature Showcase
 
 ### 1. Visual Operations Suite (Web GUI)
 AirTap includes a built-in **Visual Operations Suite** (`airtap --gui`) powered by a high-performance local WebSocket daemon and tactical dark glassmorphic UI across 10 dedicated operational views:
@@ -360,7 +385,7 @@ Master cellular radio security, 5G NR architecture, IMSI catcher analysis, SIM s
 
 ---
 
-## Command-Line Reference
+## ⌨️ Command-Line Reference
 
 ```text
 Usage: airtap [INPUT] [OUTPUT/MODULES] [OPTIONS]
@@ -380,7 +405,7 @@ Outputs & Modules:
   -s, --stats                   Display real-time packet statistics & RF telemetry
   -o, --pcap FILE               Save captured GSMTAP radio frames to PCAP file
   -q, --qmdl FILE               Write packets to Qualcomm .qmdl container
-  --sec-audit                   Enable real-time Radio Security Auditor (80 rules)
+  --sec-audit                   Enable real-time Radio Security Auditor (88 rules)
   --audit-log FILE              Save structured security audit alerts to JSON
   --install-plugins             Deploy Wireshark Lua dissectors to plugin dir
   --benchmark                   Execute dissection throughput & latency benchmark
@@ -408,7 +433,7 @@ Capture Tuning:
 
 ---
 
-## Troubleshooting
+## 🧰 Troubleshooting
 
 ### Android ADB Connection
 - **"Device unauthorized or offline"**: Run `adb devices` and accept the authorization prompt on the phone screen.
@@ -424,13 +449,28 @@ AirTap automatically configures and loads its custom Lua dissectors for 5G NR RR
 
 ---
 
-## Contributing
+## 📚 Documentation
+
+Full documentation lives in [`docs/wiki/`](docs/wiki/Home.md) — installation, capture
+sources, the GUI, CLI reference, security auditing, dissectors, architecture and
+troubleshooting.
+
+| | | |
+| :--- | :--- | :--- |
+| [Installation](docs/wiki/Installation.md) | [Quick Start](docs/wiki/Quick-Start.md) | [Capture Sources](docs/wiki/Capture-Sources.md) |
+| [Visual Operations Suite](docs/wiki/Visual-Operations-Suite.md) | [CLI Reference](docs/wiki/CLI-Reference.md) | [Security Auditing](docs/wiki/Security-Auditing.md) |
+| [Wireshark Dissectors](docs/wiki/Wireshark-Dissectors.md) | [EFS & NV Tools](docs/wiki/EFS-and-NV-Tools.md) | [Architecture](docs/wiki/Architecture.md) |
+| [Troubleshooting](docs/wiki/Troubleshooting.md) | [FAQ](docs/wiki/FAQ.md) | [Contributing](docs/wiki/Contributing.md) |
+
+---
+
+## 🤝 Contributing
 
 We welcome contributions from the telecommunications and cybersecurity community! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing procedures, and submission guidelines.
 
 ---
 
-## Responsible Use & Security
+## ⚖️ Responsible Use & Security
 
 AirTap is designed for research, educational purposes, network auditing, and authorized telecommunications diagnostics. Capturing radio signaling may expose sensitive subscriber identifiers (IMSI, IMEI) and location information. Use AirTap only on networks and devices you own or are explicitly authorized to test.
 
@@ -444,7 +484,7 @@ For vulnerability disclosure guidelines, please read our [Security Policy](SECUR
 
 ---
 
-## License & Acknowledgements
+## 📄 License & Acknowledgements
 
 AirTap is free and open-source software licensed under the **GNU General Public License v3.0**. The full license text is available in [LICENSE](LICENSE).
 

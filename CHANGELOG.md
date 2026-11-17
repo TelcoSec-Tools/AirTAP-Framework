@@ -4,6 +4,107 @@ All notable changes to AirTap are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-11-17
+
+### Security
+
+- **GUI API no longer reachable cross-origin**: every JSON response carried
+  `Access-Control-Allow-Origin: *`, and no handler validated `Origin`,
+  `Referer` or `Content-Type`. Because the Visual Operations Suite binds to
+  loopback with no authentication, any page an operator visited while AirTap
+  was running could read `/api/sim/inventory`, `/api/efs/ls` and captured
+  signaling, and POST to `/api/nv/write` (persistent baseband NVRAM),
+  `/api/terminal/exec` and `/api/terminal/diag_raw`. A JSON body was no
+  defence: the handlers parse the body regardless of content type, so a
+  `text/plain` form post — a CORS simple request, sent with no preflight —
+  was accepted. Requests are now rejected unless they originate from this
+  server's own loopback origin, and the wildcard header is gone. The `/ws`
+  upgrade is covered too, which matters because WebSockets are not subject
+  to CORS at all.
+- **README states the GUI is unauthenticated** and must not be bound to a
+  network or placed behind a proxy without adding authentication.
+
+### Added
+
+- **SIM & Keys tab**: UICC card profile plus the baseband's key material,
+  grouped by security boundary — USIM long-term credentials (Ki, OPc, TOPc),
+  RAM-resident session keys (CK, IK, KASME, KAUSF, KSEAF, KAMF, KNAS\*,
+  KgNB/KeNB), IMS/VoLTE/VoNR credentials, and IPsec/VoWiFi ePDG security
+  associations (IKEv2 SK_e\*/SK_a\*, child SA, EAP-AKA′ MSK). Backed by
+  `/api/sim/inventory` and `/api/sim/efs`, with the IMS/VoLTE/VoWiFi EFS
+  configuration and the USIM elementary file table.
+- Key material is redacted at the source and returned only on an explicit
+  per-field reveal, so the default response, the rendered DOM and the JSON
+  export never contain secrets. Ki and OPc are reported as sealed rather
+  than blank: they are not extractable in principle, since `EF_K` is not an
+  ISO 7816 readable file and the AKA computation runs on-card.
+
+### Fixed
+
+- **Dissectors were inert on Wireshark 3.6+**: 42 dissectors called `bit.*`
+  (Lua 5.1 LuaBitOp) or `bit32.*` (Lua 5.2) with no fallback. Wireshark 4.x
+  ships Lua 5.3/5.4, where both are absent. Lua resolves globals at call
+  time, so these loaded and registered cleanly and then raised
+  `attempt to index a nil value (global 'bit')` on the first packet reaching
+  a heuristic — appearing installed while decoding nothing. Each file now
+  carries a self-contained compatibility shim that defers to a host-provided
+  `bit`/`bit32` where one exists.
+- **False `[CRITICAL]` alerts from unanchored hex matching**: several
+  heuristics hex-encoded a whole PDU and substring-searched it, matching
+  across byte boundaries at any nibble offset and ignoring field position in
+  bit-packed ASN.1. Measured on `qc_lte_rrc.lua`, 292 of 400 random PDUs
+  (73%) raised a forced 4G→2G downgrade alert. Detection now comes from
+  UPER-decoded fields or a positional parse:
+  - GPRS ciphering is read from the GMM Authentication & Ciphering Request
+    (TS 24.008 10.5.5.3). The previous check scanned LLC frames, which could
+    never have been correct — TS 44.064 XID carries no ciphering parameter.
+    LLC now decodes its XID parameters properly instead.
+  - BSSMAP walks to the Encryption Information IE (TS 48.008 3.2.2.10, IEI
+    `0x0A`) and decodes the permitted-algorithms bitmask.
+  - Shannon GSM reads the RR Cipher Mode Setting octet (TS 44.018 10.5.2.9);
+    UMTS UEA0 detection defers to the decoded `rrc.cipheringAlgorithm`.
+  - GSM CC emergency setup walks to the Emergency Category IE (IEI `0x2E`).
+- **`eutra` treated as an LTE downgrade**: `lte_radio_sec.lua` tested
+  `redirectedCarrierInfo` with a substring match for `"utra"`, which also
+  matches `"eutra"`. From LTE, a redirect to another LTE carrier is ordinary
+  mobility, so every benign redirect was reported as a rogue eNodeB forcing
+  a 3G downgrade. Now anchored on the TS 36.331 CHOICE values.
+- **Device tab threw `ReferenceError`**: `switchTab()` called
+  `fetchDeviceDossier()`, which is defined nowhere, so the dossier never
+  populated. Hydration now uses `loadDeviceStatus()`.
+- **IP-geolocation retry storm**: the fallback cached only on success, so
+  after an HTTP 429 every caller re-requested a throttled endpoint. A 429 or
+  403 now records a backoff and concurrent callers are coalesced.
+
+### Packaging
+
+- **The wheel installed three top-level packages instead of one**:
+  `pyproject.toml` declared both `package-dir` and `packages.find`, and
+  auto-discovery won, so `src/`'s subdirectories installed as the global
+  names `inputs`, `modules` and `protocol`. `pip install airtap` succeeded
+  while `import airtap` and the `airtap` console script both failed with
+  `ModuleNotFoundError`, and three generic names were squatted in any
+  environment the wheel touched. Packages are now listed explicitly.
+- **Python support starts at 3.9**. The metadata previously claimed `>=3.6`,
+  which CI never exercised. Raising the floor surfaced two real problems:
+  `project.license` in PEP 639 string form requires setuptools >= 77, which
+  3.8 cannot resolve, and `ubuntu-latest` no longer provides 3.8 or 3.9. The
+  build-system floor was raised and the CI matrix pins 3.9 to `ubuntu-22.04`
+  so the oldest supported version stays genuinely tested.
+- The GUI no longer hardcodes its version; the asset cache-busting query and
+  the brand badge are stamped from the running package version.
+- Repository URLs across the README and packaging metadata corrected, and
+  `CLAUDE.md` / `docs/superpowers/` untracked.
+
+### Testing & CI
+
+- New suites covering the Lua dissectors under a real Lua 5.3+ interpreter,
+  the GUI frontend, the cross-origin guard, the SIM key inventory's
+  redaction model, and the packaging layout — 302 tests in total.
+- A Wireshark API stub (`tests/lua_harness/wsstub.lua`) lets dissectors run
+  outside Wireshark, so a dissector that dies on the first packet now fails
+  in CI rather than silently on live traffic.
+
 ## [2.5.0] - 2026-08-23
 
 ### Added

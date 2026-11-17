@@ -1416,6 +1416,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initSecurityStudio();
     initBtsInspector();
     initDevicePage();
+    initSimKeysPage();
     initApnAuditor();
     initIdentitiesSmsTab();
     renderRadarBlips();
@@ -1540,6 +1541,9 @@ function switchTab(tabId, pushHistory = true) {
     }
     if (tabId === 'tab-f3') {
         rebuildF3Terminal();
+    }
+    if (tabId === 'tab-sim') {
+        loadSimInventory();
     }
     if (tabId === 'tab-device') {
         // Refresh the dossier on tab entry. The tab's controls are bound once
@@ -3154,6 +3158,226 @@ window.openThreatModalFromRow = function(alert) {
 function closeThreatModal() {
     const modal = document.getElementById('threat-modal');
     if (modal) modal.style.display = 'none';
+}
+
+/* ─── SIM / UICC Card & Key Material Inventory ──────────────────────────── */
+// Key bytes are fetched per-field on an explicit operator click, never with
+// the inventory itself, so secrets stay out of the default response, the DOM
+// and any export. Revealed values are held only in the clicked element.
+let simInventory = null;
+
+function initSimKeysPage() {
+    document.getElementById('btn-sim-refresh')?.addEventListener('click', () => {
+        loadSimInventory(true);
+    });
+    document.getElementById('btn-sim-export')?.addEventListener('click', exportSimInventory);
+
+    // Delegated: reveal buttons are rendered dynamically per key row.
+    document.getElementById('sim-keys-wrap')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-reveal-key]');
+        if (btn) revealSimKey(btn);
+    });
+}
+
+function loadSimInventory(notify = false) {
+    fetch('/api/sim/inventory')
+        .then(r => r.json())
+        .then(data => {
+            simInventory = data;
+            renderSimInventory(data);
+            if (notify) showToast('SIM & key inventory refreshed', 'info');
+        })
+        .catch(() => {
+            const wrap = document.getElementById('sim-keys-wrap');
+            if (wrap) wrap.innerHTML = '<div class="sim-empty">Inventory unavailable.</div>';
+        });
+
+    fetch('/api/sim/efs')
+        .then(r => r.json())
+        .then(renderSimElementaryFiles)
+        .catch(() => {});
+}
+
+function renderSimInventory(data) {
+    if (!data) return;
+
+    const card = data.card || {};
+    setText('sim-card-iccid', 'ICCID ' + (card.iccid || '—'));
+    setText('sim-card-imsi', 'IMSI ' + (card.imsi || '—'));
+    setText('sim-card-type', card.card_type || 'USIM (UICC)');
+    setText('sim-last-poll', '⏱ ' + new Date().toLocaleTimeString());
+
+    const s = data.summary || {};
+    setText('sim-stat-total', s.total_keys ?? '—');
+    setText('sim-stat-present', s.present ?? '—');
+    setText('sim-stat-sealed', s.sealed ?? '—');
+    setText('sim-stat-status', data.status === 'ok' ? 'Live' :
+                               data.status === 'offline' ? 'No Device' : 'Error');
+
+    const notice = document.getElementById('sim-notice');
+    if (notice) {
+        const msg = data.notice || data.error;
+        notice.style.display = msg ? 'block' : 'none';
+        notice.textContent = msg || '';
+    }
+
+    renderSimKeyGroups(data.groups || []);
+    renderSimConfig(data.ims_config || []);
+}
+
+function renderSimKeyGroups(groups) {
+    const wrap = document.getElementById('sim-keys-wrap');
+    if (!wrap) return;
+
+    if (!groups.length) {
+        wrap.innerHTML = '<div class="sim-empty">No key groups reported.</div>';
+        return;
+    }
+
+    wrap.innerHTML = groups.map(g => {
+        const rows = (g.keys || []).map(k => {
+            // A sealed key exists but cannot leave its security boundary.
+            // That is a different statement from "not read yet", so it gets
+            // its own affordance rather than an empty value cell.
+            const stateCls = !k.readable ? 'sealed'
+                           : k.present ? 'present' : 'absent';
+            const stateTxt = !k.readable ? 'SEALED'
+                           : (k.state || 'unknown').toUpperCase();
+
+            const valueCell = !k.readable
+                ? '<span class="sim-key-sealed" title="' +
+                  escapeHtml(k.note || 'Not extractable') +
+                  '">●●●●●●●● not extractable</span>'
+                : '<span class="sim-key-masked" data-key-slot>••••••••••••</span>' +
+                  '<button class="sim-reveal-btn" data-reveal-key="' + escapeHtml(k.name) + '" title="Reveal this value">Reveal</button>';
+
+            return '<tr>' +
+                '<td class="sim-key-name">' + escapeHtml(k.name) +
+                  (k.note ? '<span class="sim-key-note">' + escapeHtml(k.note) + '</span>' : '') +
+                '</td>' +
+                '<td>' + escapeHtml(k.algorithm || '—') + '</td>' +
+                '<td class="sim-key-bits">' + (k.bits ? k.bits + '-bit' : '—') + '</td>' +
+                '<td><span class="sim-state ' + stateCls + '">' + escapeHtml(stateTxt) + '</span></td>' +
+                '<td class="sim-key-src">' + escapeHtml(k.source || '—') + '</td>' +
+                '<td class="sim-key-value">' + valueCell + '</td>' +
+                '</tr>';
+        }).join('');
+
+        return '<div class="card sim-key-group">' +
+            '<div class="card-header"><div>' +
+              '<h3 style="margin:0;color:var(--accent-cyan)">' + escapeHtml(g.title) + '</h3>' +
+              '<span style="font-size:11px;color:var(--text-secondary)">' + escapeHtml(g.subtitle || '') + '</span>' +
+            '</div></div>' +
+            '<table class="sim-key-table"><thead><tr>' +
+              '<th>Key</th><th>Algorithm</th><th>Length</th><th>State</th><th>Source</th><th>Value</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>' +
+        '</div>';
+    }).join('');
+}
+
+function revealSimKey(btn) {
+    const name = btn.getAttribute('data-reveal-key');
+    const slot = btn.parentElement?.querySelector('[data-key-slot]');
+    if (!slot) return;
+
+    if (btn.dataset.shown === '1') {
+        slot.textContent = '•'.repeat(12);
+        btn.textContent = 'Reveal';
+        btn.dataset.shown = '0';
+        return;
+    }
+
+    fetch('/api/sim/inventory?reveal=1')
+        .then(r => r.json())
+        .then(data => {
+            let found = null;
+            (data.groups || []).forEach(g => (g.keys || []).forEach(k => {
+                if (k.name === name) found = k;
+            }));
+            if (found && found.value) {
+                slot.textContent = found.value;
+                btn.textContent = 'Hide';
+                btn.dataset.shown = '1';
+            } else {
+                // No captured bytes: the slot is defined by the key hierarchy
+                // but nothing has been observed on this session yet.
+                slot.textContent = found && found.fingerprint
+                    ? 'fp:' + found.fingerprint
+                    : 'not captured';
+                slot.classList.add('sim-key-unavailable');
+                btn.textContent = 'Reveal';
+                showToast('No key bytes captured for ' + name, 'warn');
+            }
+        })
+        .catch(() => showToast('Reveal failed', 'error'));
+}
+
+function renderSimConfig(items) {
+    const body = document.getElementById('sim-config-body');
+    if (!body) return;
+
+    if (!items.length) {
+        body.innerHTML = '<div class="sim-empty">No IMS configuration available (requires a connected baseband).</div>';
+        return;
+    }
+
+    body.innerHTML = items.map(it => {
+        const attrs = (it.attributes || []).map(a =>
+            '<div class="sim-attr' + (a.secret ? ' secret' : '') + '">' +
+              '<span class="sim-attr-name">' + escapeHtml(a.name) + '</span>' +
+              '<span class="sim-attr-val">' + escapeHtml(a.value) + '</span>' +
+            '</div>').join('');
+
+        return '<div class="sim-config-item">' +
+            '<div class="sim-config-head">' +
+              '<span class="sim-config-path">' + escapeHtml(it.path) + '</span>' +
+              '<span class="sim-config-status ' + (it.present ? 'ok' : 'missing') + '">' +
+                (it.present ? it.size + ' bytes' : (it.error ? 'unreadable' : 'absent')) +
+              '</span>' +
+            '</div>' +
+            (attrs ? '<div class="sim-attr-grid">' + attrs + '</div>' : '') +
+        '</div>';
+    }).join('');
+}
+
+function renderSimElementaryFiles(data) {
+    const body = document.getElementById('sim-ef-body');
+    if (!body) return;
+
+    const files = (data && data.files) || [];
+    if (!files.length) {
+        body.innerHTML = '<div class="sim-empty">No elementary files reported.</div>';
+        return;
+    }
+
+    body.innerHTML = '<table class="sim-ef-table"><thead><tr>' +
+        '<th>File</th><th>FID</th><th>Description</th>' +
+        '</tr></thead><tbody>' +
+        files.map(f =>
+            '<tr><td class="sim-ef-name">' + escapeHtml(f.name) + '</td>' +
+            '<td class="sim-ef-fid">' + escapeHtml(f.fid) + '</td>' +
+            '<td>' + escapeHtml(f.description) + '</td></tr>').join('') +
+        '</tbody></table>';
+}
+
+function exportSimInventory() {
+    if (!simInventory) {
+        showToast('Nothing to export yet', 'warn');
+        return;
+    }
+    // Strip any revealed values before writing the file: an export is the
+    // most likely artefact to be shared or archived.
+    const safe = JSON.parse(JSON.stringify(simInventory));
+    (safe.groups || []).forEach(g => (g.keys || []).forEach(k => { k.value = null; }));
+
+    const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'airtap-sim-key-inventory.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Inventory exported (key material excluded)', 'success');
 }
 
 /* ─── Device Hardware & Diagnostics Dossier (Optimized) ─────────────────── */

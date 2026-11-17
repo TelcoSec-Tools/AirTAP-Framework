@@ -1,7 +1,7 @@
 # AirTap: Cellular Radio Diagnostics & Security Framework
 
 [![CI](https://github.com/TelcoSec-Tools/AirTAP-Framework/actions/workflows/ci.yml/badge.svg)](https://github.com/TelcoSec-Tools/AirTAP-Framework/actions/workflows/ci.yml)
-[![Python Version](https://img.shields.io/badge/python-3.8%20%7C%203.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Python Version](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL%203.0-green.svg)](LICENSE)
 [![Wireshark: Supported](https://img.shields.io/badge/Wireshark-GSMTAP%20v2%20%2B%20Lua-blueviolet.svg)](https://www.wireshark.org/)
 [![Standards](https://img.shields.io/badge/3GPP-2G%20%7C%203G%20%7C%204G%20%7C%205G%20NR%20%7C%20IMS-orange.svg)](https://www.3gpp.org/)

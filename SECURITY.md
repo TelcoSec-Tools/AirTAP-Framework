@@ -6,8 +6,9 @@ The following versions of AirTap are actively maintained with security and proto
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 2.0.x   | :white_check_mark: |
-| < 2.0.0 | :x:                |
+| 2.5.x   | :white_check_mark: |
+| 2.4.x   | :white_check_mark: |
+| < 2.4.0 | :x:                |
 
 ---
 

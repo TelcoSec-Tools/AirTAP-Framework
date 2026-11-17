@@ -85,6 +85,32 @@ against crafted frames.
 These wiki pages live in `docs/wiki/` so they are versioned with the code and reviewed
 in the same pull requests. Update them alongside behaviour changes.
 
+## Never commit real subscriber data
+
+Captures from a live network contain subscriber identifiers — IMSI, IMEI, TMSI,
+MSISDN, SMS bodies, location. Once published they cannot be recalled.
+
+Before committing any capture, dump and inspect it:
+
+```bash
+tshark -r capture.pcap -T fields   -e e212.imsi -e gsm_a.imsi -e e212.imei -e gsm_a.imei   -e gsm_a.tmsi -e nas_eps.emm.m_tmsi -e e212.guti   -e gsm_a.dtap.called_party_bcd_num -e gsm_sms.sms_text
+```
+
+Any output means the capture carries real identities. Either redact them or use
+reserved ranges instead:
+
+| Kind | Reserved value |
+| :--- | :--- |
+| PLMN | MCC `001`, MNC `01` (test network) |
+| North American numbers | `+1555-01xx` |
+| Domains | `example.com`, `example.net` |
+
+The existing files under `docs/sample_pcaps/` are inherited verbatim from upstream
+QCSuper and documented in that directory's README; they are an exception for
+provenance reasons, not a precedent.
+
+---
+
 ## Releasing
 
 Releases are cut by pushing a version tag. `.github/workflows/release.yml` then

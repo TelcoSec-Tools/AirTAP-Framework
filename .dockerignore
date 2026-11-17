@@ -1,0 +1,43 @@
+# Keep the build context small and the image clean.
+
+.git
+.github
+.gitignore
+.venv
+venv
+env
+scratch
+.remember
+captures
+*.pcap
+*.pcapng
+*.qmdl
+*.dlf
+
+__pycache__
+**/__pycache__
+*.py[cod]
+*.egg-info
+**/*.egg-info
+.pytest_cache
+.mypy_cache
+.coverage
+htmlcov
+build
+dist
+
+# Screenshots and sample captures are large and unused at runtime.
+docs/screenshots
+docs/sample_pcaps
+docs/*.png
+
+# Windows/macOS adb binaries are dead weight in a Linux image.
+src/inputs/external/adb/adb_windows.exe
+src/inputs/external/adb/AdbWinApi.dll
+src/inputs/external/adb/AdbWinUsbApi.dll
+src/inputs/external/adb/adb_macos
+src/inputs/external/adb/lib64
+
+Dockerfile
+docker-compose.yml
+.dockerignore

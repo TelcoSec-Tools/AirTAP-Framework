@@ -1,0 +1,92 @@
+# ==============================================================================
+# AirTap Framework - TelcoSec
+#
+# Default service gives the container full hardware access to USB basebands.
+#
+#   docker compose run --rm airtap selftest
+#   docker compose run --rm airtap --adb --pcap-dump /captures/capture.pcap --stats
+#   docker compose up gui          # then open http://localhost:5000
+#
+# Linux hosts: works as-is. Windows/macOS: Docker Desktop runs a Linux VM with
+# no host USB bus, so attach the device into the VM first - on Windows use
+# usbipd-win ('usbipd bind --busid X-Y' then 'usbipd attach --wsl'), or use the
+# 'airtap-remote' service below to talk to an adb server on the host instead.
+# ==============================================================================
+
+x-airtap-base: &airtap-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: telcosec/airtap:latest
+  volumes:
+    # Captures, pcaps and logs land here on the host.
+    - ./captures:/captures
+    # Device metadata so pyusb/udev can resolve descriptors.
+    - /run/udev:/run/udev:ro
+  working_dir: /captures
+  stdin_open: true
+  tty: true
+
+services:
+  # ---------------------------------------------------------------------------
+  # Full hardware access: raw USB DIAG + adb. This is the normal way to run.
+  #
+  # privileged + the /dev/bus/usb mount is what lets pyusb claim the DIAG
+  # interface directly. It is broad on purpose: a DIAG endpoint is not
+  # reachable through a narrower device cgroup rule once the kernel rebinds
+  # the interface mid-session, which basebands do when switching composition.
+  # ---------------------------------------------------------------------------
+  airtap:
+    <<: *airtap-base
+    container_name: airtap
+    privileged: true
+    volumes:
+      - ./captures:/captures
+      - /run/udev:/run/udev:ro
+      - /dev/bus/usb:/dev/bus/usb
+    # Lets the container see host USB hotplug events as the device re-enumerates.
+    network_mode: host
+    pid: host
+
+  # ---------------------------------------------------------------------------
+  # Same, plus the Visual Operations Suite published on :5000.
+  # Uses bridge networking so the port mapping applies.
+  # ---------------------------------------------------------------------------
+  gui:
+    <<: *airtap-base
+    container_name: airtap-gui
+    privileged: true
+    volumes:
+      - ./captures:/captures
+      - /run/udev:/run/udev:ro
+      - /dev/bus/usb:/dev/bus/usb
+    ports:
+      - "127.0.0.1:5000:5080"
+    command: ["--adb", "--gui"]
+
+  # ---------------------------------------------------------------------------
+  # No USB passthrough: reaches an adb server running on the host.
+  # The practical option on Docker Desktop (Windows/macOS).
+  # On the host first run:  adb -a -P 5037 nodaemon server
+  # ---------------------------------------------------------------------------
+  airtap-remote:
+    <<: *airtap-base
+    container_name: airtap-remote
+    environment:
+      ADB_SERVER_SOCKET: tcp:host.docker.internal:5037
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:5000:5080"
+
+  # ---------------------------------------------------------------------------
+  # Offline analysis of existing captures - no hardware, no privileges.
+  # e.g. docker compose run --rm airtap-offline --pcap-read /captures/old.pcap
+  # ---------------------------------------------------------------------------
+  airtap-offline:
+    <<: *airtap-base
+    container_name: airtap-offline
+    environment:
+      AIRTAP_SKIP_ADB: "1"
+    security_opt:
+      - no-new-privileges:true

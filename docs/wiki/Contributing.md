@@ -85,6 +85,61 @@ against crafted frames.
 These wiki pages live in `docs/wiki/` so they are versioned with the code and reviewed
 in the same pull requests. Update them alongside behaviour changes.
 
+## Releasing
+
+Releases are cut by pushing a version tag. `.github/workflows/release.yml` then
+builds, validates and publishes.
+
+```bash
+# 1. Bump the single source of truth
+#    src/__init__.py  ->  __version__ = '2.7.0'
+# 2. Add a CHANGELOG entry
+# 3. Merge to master and wait for CI to go green
+# 4. Tag and push
+git tag -a v2.7.0 -m "AirTap 2.7.0"
+git push origin v2.7.0
+```
+
+The workflow refuses to publish if the tag disagrees with `__version__`. A PyPI
+version can never be reused once uploaded, so that gate exists to stop a
+mismatched release becoming permanent.
+
+Before uploading it also:
+
+- builds on Linux (a Windows-built wheel loses the executable bit on the bundled
+  `adb` binaries);
+- runs `twine check`;
+- asserts the wheel exposes exactly one top-level package, `airtap`, and that the
+  107 `.lua` dissectors and executable `adb` binaries are present;
+- installs the wheel into a clean virtualenv and confirms `import airtap`, the
+  console script, and dissector discovery all work.
+
+That last check exists because a previous build installed `src/`'s subdirectories
+as top-level packages: `pip install` succeeded while `import airtap` failed.
+
+### PyPI Trusted Publishing
+
+No API token is stored. PyPI mints a short-lived credential from the workflow's
+OIDC identity, so there is no long-lived secret to leak or rotate.
+
+One-time setup on PyPI (https://pypi.org/manage/account/publishing/):
+
+| Field | Value |
+| :--- | :--- |
+| PyPI project name | `airtap` |
+| Owner | `TelcoSec-Tools` |
+| Repository | `AirTAP-Framework` |
+| Workflow name | `release.yml` |
+| Environment | `pypi` |
+
+Then create a repository environment named `pypi` under **Settings → Environments**.
+Adding required reviewers there gives a manual approval gate before every upload.
+
+To rehearse without touching the real index, run the workflow manually
+(**Actions → Release → Run workflow**) and select `testpypi`.
+
+---
+
 ## Pull requests
 
 CI must be green — lint, the 15-job test matrix, and the build job that verifies the

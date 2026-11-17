@@ -81,6 +81,56 @@ jobs:
       - name: Run test suite via unittest runner
         run: python tests/tests.py
 
+  docker:
+    name: Docker image build & smoke test
+    needs: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: telcosec/airtap:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Fails if the Python deps, the LTE/NR RRC ASN.1 specs, tshark or adb are
+      # missing from the image.
+      - name: Self-test
+        run: docker run --rm telcosec/airtap:ci selftest
+
+      # The Dockerfile already fails the build if tshark rejects the Lua
+      # dissectors (Debian releases before trixie link Lua 5.2, where their
+      # bitwise operators are a syntax error). This checks the outcome: the
+      # sample capture must decode as LTE RRC, not as raw UDP.
+      - name: Dissectors decode a real capture
+        run: |
+          out=$(docker run --rm -v "$PWD/docs/sample_pcaps:/data:ro"             telcosec/airtap:ci tshark -r /data/sample_2g_3g_4g_xperia.pcap -c 5)
+          echo "$out"
+          grep -q "LTE RRC" <<<"$out" || { echo "::error::capture did not decode as LTE RRC"; exit 1; }
+
+      # `-r` used to die with AttributeError: no attribute 'read_loop'.
+      - name: Replay (-r) runs to completion
+        run: |
+          docker run --rm -e AIRTAP_SKIP_ADB=1             -v "$PWD/docs/sample_pcaps:/data:ro" telcosec/airtap:ci             -r /data/sample_2g_3g_4g_xperia_with_sib_and_nas.pcap --replay-speed 0 --audit             > replay.log 2>&1
+          cat replay.log
+          ! grep -q "AttributeError" replay.log
+
+      # Re-dumping a pcap silently dropped most frames; it must be refused, and
+      # the refusal must be visible in the exit code.
+      - name: Refuses to re-dump a PCAP
+        run: |
+          set +e
+          docker run --rm -e AIRTAP_SKIP_ADB=1             -v "$PWD/docs/sample_pcaps:/data:ro" telcosec/airtap:ci             --pcap-read /data/sample_2g_3g_4g_xperia.pcap --pcap-dump /tmp/x.pcap
+          rc=$?
+          [ "$rc" -eq 1 ] || { echo "::error::expected exit 1, got $rc"; exit 1; }
+
   build:
     name: Build & Validate Distribution Artifacts
     needs: test

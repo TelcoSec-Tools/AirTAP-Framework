@@ -95,6 +95,25 @@ exposes it with per-rule trigger counts.
 
 ---
 
+## APN & 5G network slice auditing
+
+A separate pass audits the packet-data profiles the device is provisioned with,
+rather than the live signaling.
+
+```bash
+airtap --apn-audit                 # audit the configured APN / DNN profiles
+airtap --apn-sst 1 --apn-audit     # check a specific 5G slice (SST)
+airtap --apn-pdp IPV4V6 --apn-audit
+airtap --apn-proxy --apn-audit     # flag proxy-bearing profiles
+airtap --apn-restr --apn-audit     # flag restricted-access profiles
+```
+
+It inspects APN/DNN names, PDP/PDN types, proxy settings, access restrictions, and
+5G **S-NSSAI** slice identifiers (SST and SD), flagging combinations that weaken
+isolation between slices or route traffic through an unexpected proxy.
+
+---
+
 ## Reading a finding
 
 Each alert carries the rule ID, severity, the field that triggered it, and the decoded
